@@ -29,7 +29,7 @@
     root.innerHTML = `
       <div class="sidebar-logo">
         <img src="/logosemfundo.png" alt="Grupo Raviera" onerror="this.style.display='none'">
-        <span class="sidebar-brand">Raviera</span>
+        <span class="sidebar-brand">RAVIERA</span>
       </div>
       <div class="sidebar-links">${linksHtml}</div>
     `;

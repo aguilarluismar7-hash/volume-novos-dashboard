@@ -73,6 +73,7 @@
     min-width:260px;
     white-space:normal;
   }
+  table.dre .col-indicador{text-align:center;}
   table.dre thead th{
     color:var(--muted);
     font-weight:700;
@@ -85,8 +86,8 @@
   tr.parent-row{background:#fafbfc; cursor:pointer;}
   tr.parent-row td:first-child{font-weight:700; color:var(--navy);}
   tr.parent-row.no-children{cursor:default;}
-  tr.child-row td:first-child{padding-left:34px; color:var(--slate);}
-  tr.child-row{display:none;}
+  tr.child-row{display:none; background:#f7f8fa;}
+  tr.child-row td:first-child{padding-left:34px; color:var(--slate); border-left:2px solid var(--border);}
   tr.child-row.open{display:table-row;}
 
   /* Cores por tipo de linha, identificadas pelo ID Gerencial (mais confiável que o texto) */
@@ -355,22 +356,22 @@ function render(rows){
   const REAL_1S25 = 'Realizado 1S 2025';
 
   const atingCell = (parentVals, isPercent) => {
-    if(isPercent) return '<td>-</td>';
+    if(isPercent) return '<td class="col-indicador">-</td>';
     const real = parentVals[REAL_1S26], budget = parentVals[BUDGET_1S26];
-    if(real === undefined || budget === undefined || !budget) return '<td>-</td>';
+    if(real === undefined || budget === undefined || !budget) return '<td class="col-indicador">-</td>';
     const pct = (real / budget) * 100;
     const width = Math.max(0, Math.min(100, pct));
     const texto = pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
-    return `<td style="background:linear-gradient(to right, rgba(15,36,64,0.10) ${width}%, transparent ${width}%);">${texto}</td>`;
+    return `<td class="col-indicador" style="background:linear-gradient(to right, rgba(59,130,246,0.22) ${width}%, transparent ${width}%);">${texto}</td>`;
   };
 
   const crescCell = (parentVals, isPercent) => {
-    if(isPercent) return '<td>-</td>';
+    if(isPercent) return '<td class="col-indicador">-</td>';
     const atual = parentVals[REAL_1S26], anterior = parentVals[REAL_1S25];
-    if(atual === undefined || anterior === undefined || !anterior) return '<td>-</td>';
+    if(atual === undefined || anterior === undefined || !anterior) return '<td class="col-indicador">-</td>';
     const pct = ((atual - anterior) / Math.abs(anterior)) * 100;
     const texto = (pct>=0?'+':'') + pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
-    return `<td>${texto}</td>`;
+    return `<td class="col-indicador">${texto}</td>`;
   };
 
   let bodyHtml = '';
@@ -394,12 +395,13 @@ function render(rows){
       const vals = values[child.key] || {};
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
         periods.map(p => cell(vals[p] !== undefined ? vals[p] : null, isPercent)).join('') +
-        `<td>-</td><td>-</td>` +
+        `<td class="col-indicador">-</td><td class="col-indicador">-</td>` +
         `</tr>`;
     });
   });
 
-  const headHtml = `<th></th>` + periods.map(p => `<th>${p}</th>`).join('') + `<th>Ating.</th><th>Cresc.</th>`;
+  const headHtml = `<th></th>` + periods.map(p => `<th>${p}</th>`).join('') + `<th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
+
 
   document.getElementById('content').innerHTML = `
     <section class="block">
