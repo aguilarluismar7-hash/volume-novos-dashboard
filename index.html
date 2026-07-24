@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Volume de Vendas — Veículos Novos | Grupo Raviera</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy:#0f2440;
+    --navy-2:#16345c;
+    --slate:#5b6b82;
+    --slate-light:#8fa0b8;
+    --bg:#f4f6f9;
+    --card:#ffffff;
+    --border:#e2e8f0;
+    --green:#1f8a5f;
+    --red:#c8442d;
+    --text:#1a2434;
+    --muted:#6b7789;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:28px 32px 60px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+  header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    flex-wrap:wrap;
+    gap:12px;
+    margin-bottom:22px;
+  }
+  h1{
+    font-size:1.55rem;
+    font-weight:700;
+    margin:0 0 4px;
+    color:var(--navy);
+    letter-spacing:-0.01em;
+  }
+  .subtitle{color:var(--muted);font-size:0.92rem;}
+  .status{
+    text-align:right;
+    font-size:0.78rem;
+    color:var(--muted);
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:6px;
+  }
+  #refreshBtn{
+    background:var(--navy);
+    color:#fff;
+    border:none;
+    padding:7px 14px;
+    border-radius:7px;
+    font-size:0.8rem;
+    cursor:pointer;
+    font-weight:600;
+  }
+  #refreshBtn:hover{background:var(--navy-2);}
+  #refreshBtn:disabled{opacity:0.6;cursor:default;}
+
+  .filters{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:14px;
+    margin-bottom:22px;
+  }
+  .filter label{
+    display:block;
+    font-size:0.7rem;
+    font-weight:700;
+    letter-spacing:0.04em;
+    color:var(--slate);
+    margin-bottom:5px;
+    text-transform:uppercase;
+  }
+  .filter select{
+    width:100%;
+    padding:9px 10px;
+    border:1px solid var(--border);
+    border-radius:8px;
+    background:#fff;
+    font-size:0.9rem;
+    color:var(--text);
+  }
+
+  .kpi-row{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .kpi-row.two{grid-template-columns:repeat(2,1fr);}
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:18px 20px;
+  }
+  .kpi-label{
+    font-size:0.7rem;
+    font-weight:700;
+    letter-spacing:0.04em;
+    color:var(--slate);
+    text-transform:uppercase;
+    margin-bottom:10px;
+  }
+  .kpi-value{font-size:1.9rem;font-weight:700;color:var(--navy);line-height:1;}
+  .kpi-value.red{color:var(--red);}
+  .kpi-value.green{color:var(--green);}
+  .kpi-sub{margin-top:6px;font-size:0.8rem;color:var(--muted);}
+
+  section.block{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:20px 22px;
+    margin-bottom:16px;
+  }
+  .block h2{
+    font-size:0.98rem;
+    font-weight:700;
+    color:var(--navy);
+    margin:0 0 14px;
+  }
+  table.monthly{
+    width:100%;
+    border-collapse:collapse;
+    font-size:0.83rem;
+  }
+  table.monthly th, table.monthly td{
+    padding:8px 6px;
+    text-align:right;
+    border-bottom:1px solid var(--border);
+    white-space:nowrap;
+  }
+  table.monthly th:first-child, table.monthly td:first-child{
+    text-align:left;
+    min-width:140px;
+    color:var(--slate);
+    font-weight:600;
+  }
+  table.monthly thead th{
+    color:var(--muted);
+    font-weight:700;
+    font-size:0.72rem;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+  table.monthly td.total, table.monthly th.total{
+    font-weight:700;
+    color:var(--navy);
+    border-left:2px solid var(--border);
+  }
+  table.monthly tbody tr:last-child td{border-bottom:none;}
+  td.dash{color:var(--slate-light);}
+
+  .charts{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+  }
+  .chart-box{position:relative; height:340px;}
+
+  .note{font-size:0.78rem;color:var(--muted);margin-top:10px;line-height:1.5;}
+  .loading, .error{
+    text-align:center;
+    padding:60px 20px;
+    color:var(--muted);
+  }
+  .error{color:var(--red);}
+  @media (max-width:900px){
+    .filters{grid-template-columns:repeat(2,1fr);}
+    .kpi-row{grid-template-columns:1fr;}
+    .kpi-row.two{grid-template-columns:1fr;}
+    .charts{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Volume de Vendas — Veículos Novos</h1>
+      <div class="subtitle">Comparativo de Realizado 2025, Realizado 2026 e Budget 2026 · Grupo Raviera</div>
+    </div>
+    <div class="status">
+      <span id="lastUpdated">Carregando…</span>
+      <button id="refreshBtn" onclick="loadAll()">Atualizar dados</button>
+    </div>
+  </header>
+
+  <div class="filters">
+    <div class="filter">
+      <label>Estado</label>
+      <select id="fEstado"><option value="Todos">Todos</option></select>
+    </div>
+    <div class="filter">
+      <label>Canal</label>
+      <select id="fCanal">
+        <option value="Todos">Todos</option>
+        <option value="V.N">V.N</option>
+        <option value="VD">VD</option>
+      </select>
+    </div>
+    <div class="filter">
+      <label>Loja</label>
+      <select id="fLoja"><option value="Todas">Todas as lojas</option></select>
+    </div>
+    <div class="filter">
+      <label>Semestre</label>
+      <select id="fSemestre">
+        <option value="ANO">Ano completo</option>
+        <option value="S1">S1 (jan–jun)</option>
+        <option value="S2">S2 (jul–dez)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading">Carregando dados da planilha…</div>
+  </div>
+</div>
+
+<script>
+const SHEET_ID = '1USGH8rZHNmuSil0ZugmdW8DkGWOV4W1xvOsVpRC-otE';
+
+const MESES = [
+  {abbr:'jan', label:'Jan', ordem:1, semestre:'S1'},
+  {abbr:'fev', label:'Fev', ordem:2, semestre:'S1'},
+  {abbr:'mar', label:'Mar', ordem:3, semestre:'S1'},
+  {abbr:'abr', label:'Abr', ordem:4, semestre:'S1'},
+  {abbr:'mai', label:'Mai', ordem:5, semestre:'S1'},
+  {abbr:'jun', label:'Jun', ordem:6, semestre:'S1'},
+  {abbr:'jul', label:'Jul', ordem:7, semestre:'S2'},
+  {abbr:'ago', label:'Ago', ordem:8, semestre:'S2'},
+  {abbr:'set', label:'Set', ordem:9, semestre:'S2'},
+  {abbr:'out', label:'Out', ordem:10, semestre:'S2'},
+  {abbr:'nov', label:'Nov', ordem:11, semestre:'S2'},
+  {abbr:'dez', label:'Dez', ordem:12, semestre:'S2'},
+];
+
+let volumeData = [];   // {n, loja, canal, cenario, mes, valor}
+let lojasMap = {};      // n -> {loja, estado}
+let charts = {top10:null, estado:null};
+
+function csvUrl(sheetName){
+  // Same-origin call to our own serverless function (api/sheet.js), which fetches
+  // the Google Sheet CSV server-side, avoiding the browser's CORS restriction.
+  return `/api/sheet?tab=${encodeURIComponent(sheetName)}`;
+}
+
+// Minimal CSV parser that handles quoted fields with commas
+function parseCSV(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else { inQuotes = false; }
+      } else { field += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(c === '\r'){ /* skip */ }
+      else { field += c; }
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length===1 && r[0] !== ''));
+}
+
+async function fetchSheet(name){
+  const res = await fetch(csvUrl(name));
+  if(!res.ok) throw new Error(`Não consegui ler a aba "${name}" (status ${res.status})`);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+function toNumber(v){
+  if(v === undefined || v === null || v === '') return null;
+  const n = parseFloat(String(v).replace(/\./g,'').replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+
+async function loadAll(){
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = 'Atualizando…';
+  document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
+  try{
+    const [volRows, lojaRows] = await Promise.all([
+      fetchSheet('TabVolume'),
+      fetchSheet('TabLojas'),
+    ]);
+
+    // TabVolume: N | Loja | Canal | Cenário | Mês | Valor
+    volumeData = volRows.slice(1).map(r => ({
+      n: parseInt(r[0], 10),
+      loja: r[1],
+      canal: r[2],
+      cenario: r[3],
+      mes: (r[4]||'').trim().toLowerCase(),
+      valor: toNumber(r[5]),
+    })).filter(r => !isNaN(r.n) && r.loja);
+
+    // TabLojas: N | Loja | Estado
+    lojasMap = {};
+    lojaRows.slice(1).forEach(r => {
+      const n = parseInt(r[0], 10);
+      if(!isNaN(n)) lojasMap[n] = {loja: r[1], estado: r[2] || 'N/D'};
+    });
+
+    buildFilters();
+    render();
+
+    document.getElementById('lastUpdated').textContent =
+      'Atualizado em ' + new Date().toLocaleString('pt-BR');
+  } catch(err){
+    document.getElementById('content').innerHTML =
+      `<div class="error">Não consegui carregar os dados da planilha.<br>${err.message}<br><br>
+      Verifique se o Google Sheets está compartilhado como "Qualquer pessoa com o link — Leitor".</div>`;
+    document.getElementById('lastUpdated').textContent = 'Falha ao atualizar';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Atualizar dados';
+  }
+}
+
+function buildFilters(){
+  const estadoSel = document.getElementById('fEstado');
+  const lojaSel = document.getElementById('fLoja');
+  const prevEstado = estadoSel.value || 'Todos';
+  const prevLoja = lojaSel.value || 'Todas';
+
+  const estados = new Set();
+  Object.values(lojasMap).forEach(l => estados.add(l.estado));
+
+  estadoSel.innerHTML = '<option value="Todos">Todos</option>' +
+    [...estados].sort().map(e => `<option value="${e}">${e}</option>`).join('');
+  estadoSel.value = [...estados].includes(prevEstado) ? prevEstado : 'Todos';
+
+  estadoSel.onchange = () => { buildLojaOptions(); render(); };
+  document.getElementById('fCanal').onchange = render;
+  document.getElementById('fSemestre').onchange = render;
+  document.getElementById('fLoja').onchange = render;
+
+  buildLojaOptions(prevLoja);
+}
+
+function buildLojaOptions(prevLoja){
+  const lojaSel = document.getElementById('fLoja');
+  const estadoFiltro = document.getElementById('fEstado').value;
+  const nsWithVolume = new Set(volumeData.map(r => r.n));
+
+  const lojas = Object.entries(lojasMap)
+    .filter(([n]) => nsWithVolume.has(parseInt(n,10)))
+    .filter(([n, info]) => estadoFiltro === 'Todos' || info.estado === estadoFiltro)
+    .map(([n, info]) => ({n, label: volumeLabel(parseInt(n,10)) || info.loja}))
+    .sort((a,b) => a.label.localeCompare(b.label));
+
+  lojaSel.innerHTML = '<option value="Todas">Todas as lojas</option>' +
+    lojas.map(l => `<option value="${l.n}">${l.label}</option>`).join('');
+  if(prevLoja && lojas.some(l => String(l.n) === String(prevLoja))){
+    lojaSel.value = prevLoja;
+  } else {
+    lojaSel.value = 'Todas';
+  }
+}
+
+function volumeLabel(n){
+  const row = volumeData.find(r => r.n === n);
+  return row ? row.loja : null;
+}
+
+function getFilters(){
+  return {
+    estado: document.getElementById('fEstado').value,
+    canal: document.getElementById('fCanal').value,
+    loja: document.getElementById('fLoja').value,
+    semestre: document.getElementById('fSemestre').value,
+  };
+}
+
+function matchesBaseFilters(row, f, {ignoreLoja=false, ignoreEstado=false} = {}){
+  const info = lojasMap[row.n];
+  const estado = info ? info.estado : 'N/D';
+  if(!ignoreEstado && f.estado !== 'Todos' && estado !== f.estado) return false;
+  if(f.canal !== 'Todos' && row.canal !== f.canal) return false;
+  if(!ignoreLoja && f.loja !== 'Todas' && String(row.n) !== String(f.loja)) return false;
+  return true;
+}
+
+function mesesForSemestre(sem){
+  if(sem === 'S1') return MESES.filter(m => m.semestre === 'S1');
+  if(sem === 'S2') return MESES.filter(m => m.semestre === 'S2');
+  return MESES;
+}
+
+function fmt(n){
+  if(n === null || n === undefined) return '-';
+  return Math.round(n).toLocaleString('pt-BR');
+}
+
+function render(){
+  const f = getFilters();
+  const mesesAtivos = mesesForSemestre(f.semestre).map(m => m.abbr);
+
+  const sumFor = (cenario, restrictMonths) => {
+    let total = 0, any = false;
+    volumeData.forEach(row => {
+      if(row.cenario !== cenario) return;
+      if(!matchesBaseFilters(row, f)) return;
+      if(restrictMonths && !mesesAtivos.includes(row.mes)) return;
+      if(row.valor !== null){ total += row.valor; any = true; }
+    });
+    return any ? total : 0;
+  };
+
+  const real2025 = sumFor('Realizado 2025', true);
+  const real2026 = sumFor('Realizado 2026', true);
+  const budget2026 = sumFor('Budget 2026', true);
+
+  const crescimento = real2025 > 0 ? ((real2026 - real2025) / real2025) * 100 : null;
+  const atingimento = budget2026 > 0 ? (real2026 / budget2026) * 100 : null;
+
+  let html = '';
+
+  html += `<div class="kpi-row">
+    <div class="card">
+      <div class="kpi-label">Realizado 2025</div>
+      <div class="kpi-value">${fmt(real2025)}</div>
+      <div class="kpi-sub">unidades</div>
+    </div>
+    <div class="card">
+      <div class="kpi-label">Realizado 2026</div>
+      <div class="kpi-value">${fmt(real2026)}</div>
+      <div class="kpi-sub">unidades</div>
+    </div>
+    <div class="card">
+      <div class="kpi-label">Budget 2026</div>
+      <div class="kpi-value">${fmt(budget2026)}</div>
+      <div class="kpi-sub">unidades</div>
+    </div>
+  </div>`;
+
+  const crescClass = crescimento === null ? '' : (crescimento >= 0 ? 'green' : 'red');
+  const crescLabel = crescimento === null ? 'N/D' : (crescimento>=0?'+':'') + crescimento.toFixed(1) + '%';
+  const diffUnid = real2026 - real2025;
+
+  html += `<div class="kpi-row two">
+    <div class="card">
+      <div class="kpi-label">Crescimento — R.2026 vs R.2025</div>
+      <div class="kpi-value ${crescClass}">${crescLabel}</div>
+      <div class="kpi-sub">${diffUnid>=0?'+':''}${fmt(diffUnid)} unidades vs 2025</div>
+    </div>
+    <div class="card">
+      <div class="kpi-label">Atingimento — R.2026 vs Budget 2026</div>
+      <div class="kpi-value">${atingimento === null ? 'N/D' : atingimento.toFixed(1)+'%'}</div>
+      <div class="kpi-sub">${fmt(real2026)} de ${fmt(budget2026)} unidades</div>
+    </div>
+  </div>`;
+
+  // Monthly table (always full year, not restricted by semester filter)
+  const rowsDef = [
+    {cenario:'Realizado 2025', label:'2025'},
+    {cenario:'Realizado 2026', label:'2026 Realizado'},
+    {cenario:'Budget 2026', label:'2026 Budget'},
+  ];
+  let tableRows = '';
+  rowsDef.forEach(rd => {
+    let total = 0, any = false;
+    const cells = MESES.map(m => {
+      // sum across all matching rows (multiple stores can match the active filters)
+      let val = null, has=false;
+      volumeData.forEach(r => {
+        if(r.cenario===rd.cenario && r.mes===m.abbr && matchesBaseFilters(r, f) && r.valor!==null){
+          val = (val||0) + r.valor; has=true;
+        }
+      });
+      if(has){ total += val; any = true; return `<td>${fmt(val)}</td>`; }
+      return `<td class="dash">-</td>`;
+    }).join('');
+    tableRows += `<tr><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
+  });
+
+  html += `<section class="block">
+    <h2>Comparativo mensal — ${f.canal==='Todos'?'V.N + VD':f.canal}</h2>
+    <div style="overflow-x:auto;">
+    <table class="monthly">
+      <thead><tr><th>Métrica</th>${MESES.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th></tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    </div>
+    <div class="note">Total soma apenas os meses com dado lançado (meses sem Realizado ainda aparecem com "-").</div>
+  </section>`;
+
+  html += `<div class="charts">
+    <div class="block">
+      <h2>Top 10 lojas — Realizado 2026</h2>
+      <div class="chart-box"><canvas id="chartTop10"></canvas></div>
+    </div>
+    <div class="block">
+      <h2>Comparativo por estado — 2025 vs 2026</h2>
+      <div class="chart-box"><canvas id="chartEstado"></canvas></div>
+    </div>
+  </div>`;
+
+  document.getElementById('content').innerHTML = html;
+
+  renderTop10Chart(f, mesesAtivos);
+  renderEstadoChart(f, mesesAtivos);
+}
+
+function renderTop10Chart(f, mesesAtivos){
+  const totals = {};
+  volumeData.forEach(row => {
+    if(row.cenario !== 'Realizado 2026') return;
+    if(!matchesBaseFilters(row, f, {ignoreLoja:true})) return;
+    if(!mesesAtivos.includes(row.mes)) return;
+    if(row.valor === null) return;
+    totals[row.n] = (totals[row.n]||0) + row.valor;
+  });
+  const arr = Object.entries(totals)
+    .map(([n,v]) => ({label: volumeLabel(parseInt(n,10)) || n, value:v}))
+    .sort((a,b) => b.value - a.value)
+    .slice(0,10);
+
+  const ctx = document.getElementById('chartTop10');
+  if(charts.top10) charts.top10.destroy();
+  charts.top10 = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: arr.map(a=>a.label),
+      datasets:[{ data: arr.map(a=>a.value), backgroundColor:'#0f2440', borderRadius:4 }]
+    },
+    options:{
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{ x:{ grid:{color:'#eef1f5'} }, y:{ grid:{display:false} } }
+    }
+  });
+}
+
+function renderEstadoChart(f, mesesAtivos){
+  const byEstado = {};
+  volumeData.forEach(row => {
+    if(!['Realizado 2025','Realizado 2026'].includes(row.cenario)) return;
+    if(!matchesBaseFilters(row, f, {ignoreLoja:true, ignoreEstado:true})) return;
+    if(!mesesAtivos.includes(row.mes)) return;
+    if(row.valor === null) return;
+    const info = lojasMap[row.n];
+    const estado = info ? info.estado : 'N/D';
+    byEstado[estado] = byEstado[estado] || {2025:0, 2026:0};
+    if(row.cenario === 'Realizado 2025') byEstado[estado]['2025'] += row.valor;
+    else byEstado[estado]['2026'] += row.valor;
+  });
+  const estados = Object.keys(byEstado).sort();
+
+  const ctx = document.getElementById('chartEstado');
+  if(charts.estado) charts.estado.destroy();
+  charts.estado = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: estados,
+      datasets:[
+        {label:'2025', data: estados.map(e=>byEstado[e]['2025']), backgroundColor:'#a9b6c8', borderRadius:4},
+        {label:'2026', data: estados.map(e=>byEstado[e]['2026']), backgroundColor:'#0f2440', borderRadius:4},
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'top', labels:{boxWidth:12}}},
+      scales:{ x:{ grid:{display:false} }, y:{ grid:{color:'#eef1f5'} } }
+    }
+  });
+}
+
+loadAll();
+</script>
+</body>
+</html>
