@@ -12,10 +12,10 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}&_=${Date.now()}`;
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) {
       res.status(response.status).send(`Não consegui ler a aba "${tab}" da planilha (status ${response.status}). Verifique se o nome da aba está correto e se o compartilhamento continua público.`);
       return;

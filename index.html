@@ -192,8 +192,8 @@
     <div style="display:flex; align-items:center; gap:14px;">
       <img src="logosemfundo.png" alt="Grupo Raviera" style="height:44px; width:auto; object-fit:contain;" onerror="this.style.display='none'">
       <div>
-        <h1>Volume de Vendas · Veículos Novos · Grupo Raviera</h1>
-        <div class="subtitle"> </div>
+        <h1>Volume de Vendas — Veículos Novos</h1>
+        <div class="subtitle">Comparativo de Realizado 2025, Realizado 2026 e Budget 2026 · Grupo Raviera</div>
       </div>
     </div>
     <div class="status">
@@ -257,7 +257,8 @@ let charts = {top10:null, estado:null};
 function csvUrl(sheetName){
   // Same-origin call to our own serverless function (api/sheet.js), which fetches
   // the Google Sheet CSV server-side, avoiding the browser's CORS restriction.
-  return `/api/sheet?tab=${encodeURIComponent(sheetName)}`;
+  // The "_" timestamp param prevents any browser/CDN layer from serving a stale response.
+  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
 }
 
 // Minimal CSV parser that handles quoted fields with commas
@@ -284,7 +285,7 @@ function parseCSV(text){
 }
 
 async function fetchSheet(name){
-  const res = await fetch(csvUrl(name));
+  const res = await fetch(csvUrl(name), { cache: 'no-store' });
   if(!res.ok) throw new Error(`Não consegui ler a aba "${name}" (status ${res.status})`);
   const text = await res.text();
   return parseCSV(text);
