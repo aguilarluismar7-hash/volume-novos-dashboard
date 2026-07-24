@@ -163,6 +163,8 @@
   table.monthly tbody tr:last-child td{border-bottom:none;}
   td.dash{color:var(--slate-light);}
   td.suggested{color:var(--amber); font-style:italic; font-weight:600;}
+  table.monthly td.green{color:var(--green);}
+  table.monthly td.red{color:var(--red);}
 
   .charts{
     display:grid;
@@ -558,6 +560,7 @@ function render(){
   rowsDef.forEach(rd => {
     const source = rd.key === 'Sugestão' ? sugestao : monthlySums[rd.key];
     let total = 0, any = false;
+    let s1Total = 0, hasS1 = false, s2Total = 0, hasS2 = false;
     const cells = MESES.map(m => {
       const cell = source[m.abbr];
       const highlight = rd.key === 'Sugestão' && m.semestre === 'S2';
@@ -565,21 +568,34 @@ function render(){
       if(!cell.has) cls.push('dash');
       if(highlight) cls.push('suggested');
       const classAttr = cls.length ? ` class="${cls.join(' ')}"` : '';
-      if(cell.has){ total += cell.value; any = true; return `<td${classAttr}>${fmt(cell.value)}</td>`; }
+      if(cell.has){
+        total += cell.value; any = true;
+        if(m.semestre === 'S1'){ s1Total += cell.value; hasS1 = true; }
+        else { s2Total += cell.value; hasS2 = true; }
+        return `<td${classAttr}>${fmt(cell.value)}</td>`;
+      }
       return `<td${classAttr}>-</td>`;
     }).join('');
-    tableRows += `<tr><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
+
+    const cresc = (hasS1 && hasS2 && s1Total > 0) ? ((s2Total - s1Total) / s1Total) * 100 : null;
+    const crescCls = cresc === null ? '' : (cresc >= 0 ? 'green' : 'red');
+    const crescTxt = cresc === null ? '-' : (cresc>=0?'+':'') + cresc.toFixed(1) + '%';
+
+    tableRows += `<tr><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td>` +
+      `<td class="total">${hasS1?fmt(s1Total):'-'}</td>` +
+      `<td class="total">${hasS2?fmt(s2Total):'-'}</td>` +
+      `<td class="total ${crescCls}">${crescTxt}</td></tr>`;
   });
 
   html += `<section class="block">
     <h2>Comparativo mensal — ${f.canal==='Todos'?'V.N + VD':f.canal}</h2>
     <div style="overflow-x:auto;">
     <table class="monthly">
-      <thead><tr><th>Métrica</th>${MESES.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th></tr></thead>
+      <thead><tr><th>Métrica</th>${MESES.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th><th class="total">1°S</th><th class="total">2°S</th><th class="total">Cresc. %</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table>
     </div>
-    <div class="note">*Sugestão utiliza o crescimento do semestre e aplica no mês correspondente, necessário validar.</div>
+    <div class="note">*Sugestão utiliza o crescimento do semestre e aplica no mês correspondente, necessário validar.<br>Cresc. % compara o 2° Semestre com o 1° Semestre dentro da própria linha.</div>
   </section>`;
 
   html += `<div class="charts">
