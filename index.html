@@ -291,6 +291,10 @@ function toNumber(v){
   return isNaN(n) ? null : n;
 }
 
+function findCol(headerRow, name){
+  return headerRow.findIndex(h => (h||'').trim().toLowerCase() === name.toLowerCase());
+}
+
 async function loadAll(){
   const btn = document.getElementById('refreshBtn');
   btn.disabled = true;
@@ -311,21 +315,42 @@ async function loadAll(){
       fetchSheet('TabLojas'),
     ]);
 
-    // TabVolume: N | Loja | Canal | Cenário | Mês | Valor
+    // TabVolume: columns located by header name (robust to stray blank columns)
+    const volHeader = volRows[0] || [];
+    const vIdx = {
+      n: findCol(volHeader, 'N'),
+      loja: findCol(volHeader, 'Loja'),
+      canal: findCol(volHeader, 'Canal'),
+      cenario: findCol(volHeader, 'Cenário'),
+      mes: findCol(volHeader, 'Mês'),
+      valor: findCol(volHeader, 'Valor'),
+    };
+    if(Object.values(vIdx).some(i => i === -1)){
+      throw new Error('Não encontrei todas as colunas esperadas (N, Loja, Canal, Cenário, Mês, Valor) na aba TabVolume. Cabeçalho lido: ' + volHeader.join(' | '));
+    }
     volumeData = volRows.slice(1).map(r => ({
-      n: parseInt(r[0], 10),
-      loja: r[1],
-      canal: r[2],
-      cenario: r[3],
-      mes: (r[4]||'').trim().toLowerCase(),
-      valor: toNumber(r[5]),
+      n: parseInt(r[vIdx.n], 10),
+      loja: r[vIdx.loja],
+      canal: r[vIdx.canal],
+      cenario: r[vIdx.cenario],
+      mes: (r[vIdx.mes]||'').trim().toLowerCase(),
+      valor: toNumber(r[vIdx.valor]),
     })).filter(r => !isNaN(r.n) && r.loja);
 
-    // TabLojas: N | Loja | Estado
+    // TabLojas: columns located by header name
+    const lojaHeader = lojaRows[0] || [];
+    const lIdx = {
+      n: findCol(lojaHeader, 'N'),
+      loja: findCol(lojaHeader, 'Loja'),
+      estado: findCol(lojaHeader, 'Estado'),
+    };
+    if(Object.values(lIdx).some(i => i === -1)){
+      throw new Error('Não encontrei todas as colunas esperadas (N, Loja, Estado) na aba TabLojas. Cabeçalho lido: ' + lojaHeader.join(' | '));
+    }
     lojasMap = {};
     lojaRows.slice(1).forEach(r => {
-      const n = parseInt(r[0], 10);
-      if(!isNaN(n)) lojasMap[n] = {loja: r[1], estado: r[2] || 'N/D'};
+      const n = parseInt(r[lIdx.n], 10);
+      if(!isNaN(n)) lojasMap[n] = {loja: r[lIdx.loja], estado: r[lIdx.estado] || 'N/D'};
     });
 
     buildFilters();
