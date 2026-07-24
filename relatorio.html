@@ -145,16 +145,16 @@
   tr.row-total-resultado td:first-child{color:var(--navy);}
   tr.row-consolidador{background:var(--navy-2);}
   tr.row-consolidador td{color:#fff;}
-  tr.row-consolidador td.neg{color:#ffb4a3;}
+  tr.row-consolidador td:first-child{color:#fff;}
   tr.row-ebitda{background:#6b7789;}
   tr.row-ebitda td{color:#fff;}
-  tr.row-ebitda td.neg{color:#ffcfc5;}
+  tr.row-ebitda td:first-child{color:#fff;}
   tr.row-resultado-loja{background:#1a2434;}
   tr.row-resultado-loja td{color:#fff;}
-  tr.row-resultado-loja td.neg{color:#ffcfc5;}
-  tr.row-margem{background:#fbf1de;}
-  tr.row-margem td:first-child{color:var(--amber, #b7791f);}
-  tr.row-margem td{color:#8a6416;}
+  tr.row-resultado-loja td:first-child{color:#fff;}
+  tr.row-margem{background:#f4f5f7;}
+  tr.row-margem td:first-child{color:var(--slate); font-style:italic;}
+  tr.row-margem td{font-style:italic;}
 
   .toggle{
     display:inline-block;
@@ -164,7 +164,7 @@
     color:var(--slate);
     font-weight:700;
   }
-  td.neg{color:var(--red);}
+  /* Negativos ficam só entre parênteses, sem cor — evita poluição visual */
   .loading, .error{
     text-align:center;
     padding:60px 20px;
@@ -285,7 +285,10 @@ function toNumberSmart(v){
 function fmtValor(n, isPercent){
   if(n === null || n === undefined) return '-';
   if(isPercent){
-    return (n*100).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '%';
+    // Se o valor já vier como percentual "cru" (ex: 6.5) não multiplica; se vier
+    // como fração (ex: 0.065) multiplica por 100. Detecta pela magnitude.
+    const pct = Math.abs(n) < 1 ? n * 100 : n;
+    return pct.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '%';
   }
   const abs = Math.round(Math.abs(n)).toLocaleString('pt-BR');
   return n < 0 ? `(${abs})` : abs;
@@ -406,6 +409,29 @@ function render(rows){
     return `<td${cls}>${fmtValor(val, isPercent)}</td>`;
   };
 
+  const REAL_1S26 = 'Realizado 1S 2026';
+  const BUDGET_1S26 = 'Budget 1S 2026';
+  const REAL_1S25 = 'Realizado 1S 2025';
+
+  const atingCell = (parentVals, isPercent) => {
+    if(isPercent) return '<td>-</td>';
+    const real = parentVals[REAL_1S26], budget = parentVals[BUDGET_1S26];
+    if(real === undefined || budget === undefined || !budget) return '<td>-</td>';
+    const pct = (real / budget) * 100;
+    const width = Math.max(0, Math.min(100, pct));
+    const texto = pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
+    return `<td style="background:linear-gradient(to right, rgba(15,36,64,0.10) ${width}%, transparent ${width}%);">${texto}</td>`;
+  };
+
+  const crescCell = (parentVals, isPercent) => {
+    if(isPercent) return '<td>-</td>';
+    const atual = parentVals[REAL_1S26], anterior = parentVals[REAL_1S25];
+    if(atual === undefined || anterior === undefined || !anterior) return '<td>-</td>';
+    const pct = ((atual - anterior) / Math.abs(anterior)) * 100;
+    const texto = (pct>=0?'+':'') + pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
+    return `<td>${texto}</td>`;
+  };
+
   let bodyHtml = '';
   blocks.forEach((block, i) => {
     const isPercent = block.nivel1.toLowerCase().startsWith('margem');
@@ -419,17 +445,20 @@ function render(rows){
 
     bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
       periods.map(p => cell(parentVals[p] !== undefined ? parentVals[p] : null, isPercent)).join('') +
+      atingCell(parentVals, isPercent) +
+      crescCell(parentVals, isPercent) +
       `</tr>`;
 
     block.children.forEach(child => {
       const vals = values[child.key] || {};
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
         periods.map(p => cell(vals[p] !== undefined ? vals[p] : null, isPercent)).join('') +
+        `<td>-</td><td>-</td>` +
         `</tr>`;
     });
   });
 
-  const headHtml = `<th></th>` + periods.map(p => `<th>${p}</th>`).join('');
+  const headHtml = `<th></th>` + periods.map(p => `<th>${p}</th>`).join('') + `<th>Ating.</th><th>Cresc.</th>`;
 
   document.getElementById('content').innerHTML = `
     <section class="block">
@@ -437,7 +466,7 @@ function render(rows){
         <thead><tr>${headHtml}</tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.</div>
+      <div class="note">Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado 1S 2026 ÷ Budget 1S 2026. Cresc. = Realizado 1S 2026 vs Realizado 1S 2025.</div>
     </section>
   `;
 }
