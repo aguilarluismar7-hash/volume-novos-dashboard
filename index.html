@@ -162,9 +162,7 @@
   }
   table.monthly tbody tr:last-child td{border-bottom:none;}
   td.dash{color:var(--slate-light);}
-  tr.row-suggestion td{color:var(--amber); font-style:italic;}
-  tr.row-suggestion td.total{color:var(--amber);}
-  tr.row-suggestion td:first-child{font-style:normal;}
+  td.suggested{color:var(--amber); font-style:italic; font-weight:600;}
 
   .charts{
     display:grid;
@@ -191,9 +189,12 @@
 <body>
 <div class="wrap">
   <header>
-    <div>
-      <h1>Volume de Vendas — Veículos Novos</h1>
-      <div class="subtitle">Comparativo de Volume · Grupo Raviera</div>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <img src="logosemfundo.png" alt="Grupo Raviera" style="height:44px; width:auto; object-fit:contain;" onerror="this.style.display='none'">
+      <div>
+        <h1>Volume de Vendas — Veículos Novos</h1>
+        <div class="subtitle">Comparativo de Realizado 2025, Realizado 2026 e Budget 2026 · Grupo Raviera</div>
+      </div>
     </div>
     <div class="status">
       <span id="lastUpdated">Carregando…</span>
@@ -558,11 +559,15 @@ function render(){
     let total = 0, any = false;
     const cells = MESES.map(m => {
       const cell = source[m.abbr];
-      if(cell.has){ total += cell.value; any = true; return `<td>${fmt(cell.value)}</td>`; }
-      return `<td class="dash">-</td>`;
+      const highlight = rd.key === 'Sugestão' && m.semestre === 'S2';
+      const cls = [];
+      if(!cell.has) cls.push('dash');
+      if(highlight) cls.push('suggested');
+      const classAttr = cls.length ? ` class="${cls.join(' ')}"` : '';
+      if(cell.has){ total += cell.value; any = true; return `<td${classAttr}>${fmt(cell.value)}</td>`; }
+      return `<td${classAttr}>-</td>`;
     }).join('');
-    const rowClass = rd.key === 'Sugestão' ? ' class="row-suggestion"' : '';
-    tableRows += `<tr${rowClass}><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
+    tableRows += `<tr><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
   });
 
   html += `<section class="block">
