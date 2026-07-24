@@ -28,7 +28,7 @@
     min-height:100vh;
   }
   .sidebar{
-    width:160px;
+    width:200px;
     flex-shrink:0;
     background:var(--navy);
     padding:24px 16px;
@@ -275,7 +275,16 @@ async function loadAll(){
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
   try{
     const dreRows = await fetchSheet('TabDRE');
-    const header = dreRows[0] || [];
+
+    // Procura a linha de cabeçalho em qualquer posição (robusto a linhas em
+    // branco ou de título antes dela), em vez de assumir que é sempre a linha 1.
+    const headerRowIndex = dreRows.findIndex(r =>
+      r.some(cell => (cell||'').trim().toLowerCase() === 'periodo')
+    );
+    if(headerRowIndex === -1){
+      throw new Error('Não encontrei uma linha de cabeçalho contendo "Periodo" na aba TabDRE. Confira se essa coluna existe e está escrita assim.');
+    }
+    const header = dreRows[headerRowIndex];
     const idx = {
       periodo: findCol(header, 'Periodo'),
       nivel1: findCol(header, 'Nível 1'),
@@ -287,7 +296,7 @@ async function loadAll(){
       throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Nível 2, ID, Valor) na aba TabDRE. Cabeçalho lido: ' + header.join(' | '));
     }
 
-    const rows = dreRows.slice(1).map(r => ({
+    const rows = dreRows.slice(headerRowIndex + 1).map(r => ({
       periodo: (r[idx.periodo]||'').trim(),
       nivel1: (r[idx.nivel1]||'').trim(),
       nivel2: (r[idx.nivel2]||'').trim(),
