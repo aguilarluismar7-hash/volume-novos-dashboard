@@ -16,6 +16,7 @@
     --border:#e2e8f0;
     --green:#1f8a5f;
     --red:#c8442d;
+    --amber:#b7791f;
     --text:#1a2434;
     --muted:#6b7789;
   }
@@ -161,6 +162,9 @@
   }
   table.monthly tbody tr:last-child td{border-bottom:none;}
   td.dash{color:var(--slate-light);}
+  tr.row-suggestion td{color:var(--amber); font-style:italic;}
+  tr.row-suggestion td.total{color:var(--amber);}
+  tr.row-suggestion td:first-child{font-style:normal;}
 
   .charts{
     display:grid;
@@ -189,7 +193,7 @@
   <header>
     <div>
       <h1>Volume de Vendas — Veículos Novos</h1>
-      <div class="subtitle">Comparativo de Realizado 2025, Realizado 2026 e Budget 2026 · Grupo Raviera</div>
+      <div class="subtitle">Comparativo de Volume · Grupo Raviera</div>
     </div>
     <div class="status">
       <span id="lastUpdated">Carregando…</span>
@@ -504,26 +508,61 @@ function render(){
   </div>`;
 
   // Monthly table (always full year, not restricted by semester filter)
+  // Precompute monthly sums per cenário for the current filters
+  const monthlySums = {};
+  ['Realizado 2025','Realizado 2026','Budget 2026'].forEach(cen => {
+    monthlySums[cen] = {};
+    MESES.forEach(m => {
+      let val = null, has = false;
+      volumeData.forEach(r => {
+        if(r.cenario===cen && r.mes===m.abbr && matchesBaseFilters(r, f) && r.valor!==null){
+          val = (val||0) + r.valor; has = true;
+        }
+      });
+      monthlySums[cen][m.abbr] = {value: has ? val : null, has};
+    });
+  });
+
+  // Crescimento do 1º semestre (2026 vs 2025), usado para projetar a Sugestão no 2º semestre
+  const s1Meses = MESES.filter(m => m.semestre === 'S1').map(m => m.abbr);
+  let s1_2025 = 0, s1_2026 = 0, hasS1_2025 = false;
+  s1Meses.forEach(ab => {
+    if(monthlySums['Realizado 2025'][ab].has){ s1_2025 += monthlySums['Realizado 2025'][ab].value; hasS1_2025 = true; }
+    if(monthlySums['Realizado 2026'][ab].has){ s1_2026 += monthlySums['Realizado 2026'][ab].value; }
+  });
+  const crescimentoS1 = (hasS1_2025 && s1_2025 > 0) ? (s1_2026 / s1_2025) : null;
+
+  // Sugestão: repete o Realizado no 1º semestre; no 2º semestre aplica o crescimento do
+  // semestre sobre o valor do mesmo mês em 2025 (preserva sazonalidade).
+  const sugestao = {};
+  MESES.forEach(m => {
+    if(m.semestre === 'S1'){
+      sugestao[m.abbr] = monthlySums['Realizado 2026'][m.abbr];
+    } else {
+      const base = monthlySums['Realizado 2025'][m.abbr];
+      sugestao[m.abbr] = (base.has && crescimentoS1 !== null)
+        ? {value: base.value * crescimentoS1, has:true}
+        : {value:null, has:false};
+    }
+  });
+
   const rowsDef = [
-    {cenario:'Realizado 2025', label:'2025'},
-    {cenario:'Realizado 2026', label:'2026 Realizado'},
-    {cenario:'Budget 2026', label:'2026 Budget'},
+    {key:'Realizado 2025', label:'2025'},
+    {key:'Realizado 2026', label:'2026 Realizado'},
+    {key:'Budget 2026', label:'2026 Budget'},
+    {key:'Sugestão', label:'2026 Sugestão*'},
   ];
   let tableRows = '';
   rowsDef.forEach(rd => {
+    const source = rd.key === 'Sugestão' ? sugestao : monthlySums[rd.key];
     let total = 0, any = false;
     const cells = MESES.map(m => {
-      // sum across all matching rows (multiple stores can match the active filters)
-      let val = null, has=false;
-      volumeData.forEach(r => {
-        if(r.cenario===rd.cenario && r.mes===m.abbr && matchesBaseFilters(r, f) && r.valor!==null){
-          val = (val||0) + r.valor; has=true;
-        }
-      });
-      if(has){ total += val; any = true; return `<td>${fmt(val)}</td>`; }
+      const cell = source[m.abbr];
+      if(cell.has){ total += cell.value; any = true; return `<td>${fmt(cell.value)}</td>`; }
       return `<td class="dash">-</td>`;
     }).join('');
-    tableRows += `<tr><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
+    const rowClass = rd.key === 'Sugestão' ? ' class="row-suggestion"' : '';
+    tableRows += `<tr${rowClass}><td>${rd.label}</td>${cells}<td class="total">${any?fmt(total):'-'}</td></tr>`;
   });
 
   html += `<section class="block">
@@ -534,7 +573,7 @@ function render(){
       <tbody>${tableRows}</tbody>
     </table>
     </div>
-    <div class="note">Total soma apenas os meses com dado lançado (meses sem Realizado ainda aparecem com "-").</div>
+    <div class="note">*Sugestão utiliza o crescimento do semestre e aplica no mês correspondente, necessário validar.</div>
   </section>`;
 
   html += `<div class="charts">
