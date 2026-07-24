@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Volume de Vendas — Veículos Novos | Grupo Raviera</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <style>
   :root{
     --navy:#0f2440;
@@ -230,8 +230,6 @@
 </div>
 
 <script>
-const SHEET_ID = '1USGH8rZHNmuSil0ZugmdW8DkGWOV4W1xvOsVpRC-otE';
-
 const MESES = [
   {abbr:'jan', label:'Jan', ordem:1, semestre:'S1'},
   {abbr:'fev', label:'Fev', ordem:2, semestre:'S1'},
@@ -298,6 +296,15 @@ async function loadAll(){
   btn.disabled = true;
   btn.textContent = 'Atualizando…';
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
+
+  if(typeof Chart === 'undefined'){
+    document.getElementById('content').innerHTML =
+      '<div class="error">A biblioteca de gráficos (Chart.js) não carregou. Verifique sua conexão ou se o CDN está sendo bloqueado, e recarregue a página.</div>';
+    btn.disabled = false;
+    btn.textContent = 'Atualizar dados';
+    return;
+  }
+
   try{
     const [volRows, lojaRows] = await Promise.all([
       fetchSheet('TabVolume'),
