@@ -26,7 +26,35 @@
     background:var(--bg);
     color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    padding:28px 32px 60px;
+    display:flex;
+    min-height:100vh;
+  }
+  .sidebar{
+    width:200px;
+    flex-shrink:0;
+    background:var(--navy);
+    padding:24px 16px;
+    display:flex;
+    flex-direction:column;
+    gap:28px;
+  }
+  .sidebar-logo img{height:34px; width:auto; object-fit:contain;}
+  .sidebar-links{display:flex; flex-direction:column; gap:4px;}
+  .sidebar-links a{
+    color:#c3d0e2;
+    text-decoration:none;
+    padding:10px 12px;
+    border-radius:8px;
+    font-size:0.86rem;
+    font-weight:600;
+  }
+  .sidebar-links a:hover{background:rgba(255,255,255,0.08); color:#fff;}
+  .sidebar-links a.active{background:#fff; color:var(--navy);}
+  .main{flex:1; min-width:0; padding:28px 32px 60px;}
+  @media (max-width:900px){
+    body{flex-direction:column;}
+    .sidebar{width:100%; flex-direction:row; align-items:center; overflow-x:auto; padding:12px 16px;}
+    .sidebar-links{flex-direction:row;}
   }
   .wrap{max-width:1180px;margin:0 auto;}
   header{
@@ -190,10 +218,22 @@
 </style>
 </head>
 <body>
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="logosemfundo.png" alt="Grupo Raviera" onerror="this.style.display='none'">
+  </div>
+  <div class="sidebar-links">
+    <a href="/index.html" class="active">Novos</a>
+    <a href="/usados.html">Usados</a>
+    <a href="/pos-vendas.html">Pós-Vendas</a>
+    <a href="/relatorio.html">DRE</a>
+    <a href="/despesas.html">Despesas</a>
+  </div>
+</nav>
+<div class="main">
 <div class="wrap">
   <header>
     <div style="display:flex; align-items:center; gap:14px;">
-      <img src="logosemfundo.png" alt="Grupo Raviera" style="height:44px; width:auto; object-fit:contain;" onerror="this.style.display='none'">
       <div>
         <h1>Volume de Vendas — Veículos Novos</h1>
         <div class="subtitle">Comparativo de Realizado 2025, Realizado 2026 e Budget 2026 · Grupo Raviera</div>
@@ -235,6 +275,7 @@
   <div id="content">
     <div class="loading">Carregando dados da planilha…</div>
   </div>
+</div>
 </div>
 
 <script>
