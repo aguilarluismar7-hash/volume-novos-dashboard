@@ -154,6 +154,7 @@
     font-size:0.72rem;
     text-transform:uppercase;
     letter-spacing:0.03em;
+    text-align:center;
   }
   table.monthly td.total, table.monthly th.total{
     font-weight:700;
@@ -591,7 +592,7 @@ function render(){
     <h2>Comparativo mensal — ${f.canal==='Todos'?'V.N + VD':f.canal}</h2>
     <div style="overflow-x:auto;">
     <table class="monthly">
-      <thead><tr><th>Métrica</th>${MESES.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th><th class="total">1°S</th><th class="total">2°S</th><th class="total">Cresc. %</th></tr></thead>
+      <thead><tr><th></th>${MESES.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th><th class="total">1°S</th><th class="total">2°S</th><th class="total">Cresc. %</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table>
     </div>
