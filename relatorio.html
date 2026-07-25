@@ -98,6 +98,7 @@
     border-radius:3px;
     overflow:hidden;
     display:block;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.7);
   }
   .bar-fill{
     display:block;
@@ -205,8 +206,14 @@ function getValue(values, key, semestre, type, isPercent){
   const vals = values[key] || {};
   const map = PERIOD_MAP[type];
   if(semestre === 'ANO'){
-    if(isPercent) return undefined; // somar % não faz sentido, precisa vir calculado à parte
     const v1 = vals[map.S1], v2 = vals[map.S2];
+    if(isPercent){
+      // Média simples dos dois semestres (aproximação — não pondera pela receita de cada um)
+      if(v1 !== undefined && v2 !== undefined) return (v1 + v2) / 2;
+      if(v1 !== undefined) return v1;
+      if(v2 !== undefined) return v2;
+      return undefined;
+    }
     if(v1 !== undefined && v2 !== undefined) return v1 + v2;
     if(v1 !== undefined) return v1;
     if(v2 !== undefined) return v2;
@@ -215,63 +222,44 @@ function getValue(values, key, semestre, type, isPercent){
   return vals[map[semestre]];
 }
 
-function csvUrl(sheetName){
-  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
+// Tendência do ano cheio de 2026: usa o crescimento já realizado no 1° Semestre
+// (2026 vs 2025) e aplica esse mesmo ritmo sobre o 2° Semestre de 2025 — preserva
+// a sazonalidade de cada conta em vez de simplesmente dobrar o 1° Semestre.
+// Atenção: calculado direto em cada linha (inclusive Totais/Subtotais) — o Total
+// não é necessariamente igual à soma das Tendências das contas filhas.
+function getTendencia(values, key){
+  const vals = values[key] || {};
+  const real2025_S1 = vals[PERIOD_MAP.real2025.S1];
+  const real2025_S2 = vals[PERIOD_MAP.real2025.S2];
+  const real2026_S1 = vals[PERIOD_MAP.real2026.S1];
+  if(real2025_S1 === undefined || real2025_S2 === undefined || real2026_S1 === undefined || !real2025_S1) return undefined;
+  const crescimento = real2026_S1 / real2025_S1;
+  return real2026_S1 + real2025_S2 * crescimento;
 }
 
-function parseCSV(text){
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for(let i=0;i<text.length;i++){
-    const c = text[i];
-    if(inQuotes){
-      if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i++; }
-        else { inQuotes = false; }
-      } else { field += c; }
-    } else {
-      if(c === '"'){ inQuotes = true; }
-      else if(c === ','){ row.push(field); field=''; }
-      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
-      else if(c === '\r'){ /* skip */ }
-      else { field += c; }
-    }
-  }
-  if(field.length || row.length){ row.push(field); rows.push(row); }
-  return rows.filter(r => r.length > 1 || (r.length===1 && r[0] !== ''));
+function jsonUrl(sheetName){
+  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&format=json&headers=0&_=${Date.now()}`;
 }
 
-async function fetchSheet(name){
-  const res = await fetch(csvUrl(name), { cache: 'no-store' });
+// Lê os dados no formato estruturado do Google (gviz JSON): cada célula vem
+// com seu valor exato e tipado (número continua número), sem nenhuma conversão
+// de texto — elimina de vez qualquer ambiguidade de milhar/decimal.
+async function fetchSheetJSON(name){
+  const res = await fetch(jsonUrl(name), { cache: 'no-store' });
   if(!res.ok) throw new Error(`Não consegui ler a aba "${name}" (status ${res.status})`);
   const text = await res.text();
-  return parseCSV(text);
+  // A resposta vem embrulhada em "google.visualization.Query.setResponse(...);"
+  const match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if(!match) throw new Error(`Resposta inesperada da aba "${name}" — não encontrei o JSON.`);
+  const json = JSON.parse(match[1]);
+  const rows = (json.table.rows || []).map(r =>
+    (r.c || []).map(cell => (cell === null || cell === undefined) ? null : cell.v)
+  );
+  return rows;
 }
 
 function findCol(headerRow, name){
-  return headerRow.findIndex(h => (h||'').trim().toLowerCase() === name.toLowerCase());
-}
-
-// Interpreta tanto números "crus" (414830349.95, ponto decimal — o formato mais
-// provável no export do Sheets) quanto formatados no padrão BR (1.234,56).
-// Regra: se tiver vírgula, é formato BR (ponto = milhar). Sem vírgula, se o
-// último ponto tiver exatamente 3 dígitos depois E existir mais de um ponto,
-// trata como milhar; senão trata o ponto como decimal.
-function toNumberSmart(v){
-  if(v === undefined || v === null) return null;
-  let s = String(v).trim();
-  if(s === '') return null;
-  if(s.includes(',')){
-    s = s.replace(/\./g,'').replace(',', '.');
-  } else {
-    const dotCount = (s.match(/\./g) || []).length;
-    if(dotCount > 1){
-      s = s.replace(/\./g, '');
-    }
-    // dotCount === 1: mantém como decimal (ex: 414830349.95, -3158676.94)
-  }
-  const n = parseFloat(s);
-  return isNaN(n) ? null : n;
+  return headerRow.findIndex(h => String(h||'').trim().toLowerCase() === name.toLowerCase());
 }
 
 function fmtValor(n, isPercent){
@@ -299,12 +287,12 @@ function setSemestre(sem, btn){
 async function loadAll(){
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
   try{
-    const dreRows = await fetchSheet('TabDRE');
+    const dreRows = await fetchSheetJSON('TabDRE');
 
     // Procura a linha de cabeçalho em qualquer posição (robusto a linhas em
     // branco ou de título antes dela), em vez de assumir que é sempre a linha 1.
     const headerRowIndex = dreRows.findIndex(r =>
-      r.some(cell => (cell||'').trim().toLowerCase() === 'periodo')
+      r.some(cell => String(cell||'').trim().toLowerCase() === 'periodo')
     );
     if(headerRowIndex === -1){
       throw new Error('Não encontrei uma linha de cabeçalho contendo "Periodo" na aba TabDRE. Confira se essa coluna existe e está escrita assim.');
@@ -322,11 +310,11 @@ async function loadAll(){
     }
 
     currentRows = dreRows.slice(headerRowIndex + 1).map(r => ({
-      periodo: (r[idx.periodo]||'').trim(),
-      nivel1: (r[idx.nivel1]||'').trim(),
-      nivel2: (r[idx.nivel2]||'').trim(),
-      id: (r[idx.id]||'').trim(),
-      valor: toNumberSmart(r[idx.valor]),
+      periodo: String(r[idx.periodo]||'').trim(),
+      nivel1: String(r[idx.nivel1]||'').trim(),
+      nivel2: String(r[idx.nivel2]||'').trim(),
+      id: (r[idx.id] === null || r[idx.id] === undefined) ? '' : String(r[idx.id]).trim(),
+      valor: (typeof r[idx.valor] === 'number') ? r[idx.valor] : null,
     })).filter(r => r.periodo && r.nivel1);
 
     renderTable();
@@ -432,11 +420,15 @@ function renderTable(){
     return `<td class="col-indicador ${cls}">${texto}</td>`;
   };
 
-  const rowValues = (key, isPercent) => ({
-    v2025: getValue(values, key, semestre, 'real2025', isPercent),
-    v2026: getValue(values, key, semestre, 'real2026', isPercent),
-    vBudget: getValue(values, key, semestre, 'budget', isPercent),
-  });
+  const rowValues = (key, isPercent) => {
+    const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
+    const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
+    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
+    const vTendencia = (semestre === 'ANO' && !isPercent) ? getTendencia(values, key) : undefined;
+    return { v2025, v2026, vBudget, vTendencia };
+  };
+
+  const showTendencia = semestre === 'ANO';
 
   let bodyHtml = '';
   blocks.forEach((block, i) => {
@@ -447,41 +439,48 @@ function renderTable(){
     const colorClass = block.parentKey ? (ID_ROW_CLASS[idByKey[block.parentKey]] || '') : '';
     const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
     const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
-    // Totalizadores/Subtotais/Consolidadores já têm cor própria — a barrinha só
-    // aparece nas contas "normais" (sem classificação), pra não empilhar cor.
-    const skipIndicator = !!colorClass;
+    // Margem (%) continua de fora do Ating./Cresc. — dividir % por % não faz sentido.
+    const skipIndicator = isPercent;
 
-    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
+    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined, vTendencia:undefined};
+    const compareVal = showTendencia ? v.vTendencia : v.v2026;
 
     bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
       cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
       cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
       cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
-      atingCell(v.v2026, v.vBudget, isPercent || skipIndicator) +
-      crescCell(v.v2026, v.v2025, isPercent || skipIndicator) +
+      (showTendencia ? cell(v.vTendencia !== undefined ? v.vTendencia : null, false) : '') +
+      atingCell(compareVal, v.vBudget, skipIndicator) +
+      crescCell(compareVal, v.v2025, skipIndicator) +
       `</tr>`;
 
     block.children.forEach(child => {
       const cv = rowValues(child.key, isPercent);
+      const childCompareVal = showTendencia ? cv.vTendencia : cv.v2026;
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
         cell(cv.v2025 !== undefined ? cv.v2025 : null, isPercent) +
         cell(cv.v2026 !== undefined ? cv.v2026 : null, isPercent) +
         cell(cv.vBudget !== undefined ? cv.vBudget : null, isPercent) +
-        atingCell(cv.v2026, cv.vBudget, isPercent) +
-        crescCell(cv.v2026, cv.v2025, isPercent) +
+        (showTendencia ? cell(cv.vTendencia !== undefined ? cv.vTendencia : null, false) : '') +
+        atingCell(childCompareVal, cv.vBudget, isPercent) +
+        crescCell(childCompareVal, cv.v2025, isPercent) +
         `</tr>`;
     });
   });
 
   const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : 'Ano (1°+2° Semestre)';
+  const tendenciaHeader = showTendencia ? '<th>Tendência</th>' : '';
+  const tendenciaNote = showTendencia
+    ? ' Tendência = 1° Semestre 2026 + (2° Semestre 2025 × crescimento do 1° Semestre 26 vs 25) — projeção, calculada linha a linha (Totais não são necessariamente a soma das Tendências das contas filhas). No Ano, Ating./Cresc. comparam contra a Tendência, não contra o parcial realizado.'
+    : '';
 
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
-        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
+        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th>${tendenciaHeader}<th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = 2026 ÷ Budget. Cresc. = 2026 vs 2025. "Ano" soma 1°+2° Semestre quando os dois existem; se só um existir, mostra esse valor.</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.${tendenciaNote}</div>
     </section>
   `;
 }
