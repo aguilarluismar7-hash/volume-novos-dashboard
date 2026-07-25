@@ -18,7 +18,10 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:${format}&sheet=${encodeURIComponent(tab)}&headers=0&_=${Date.now()}`;
+  // O parâmetro headers=0 só é necessário (e só é aplicado) no formato JSON —
+  // evita mexer no comportamento do CSV, que o dashboard de Volume já usa sem problema.
+  const headersParam = format === 'json' ? '&headers=0' : '';
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:${format}&sheet=${encodeURIComponent(tab)}${headersParam}&_=${Date.now()}`;
 
   try {
     const response = await fetch(url, { cache: 'no-store' });
