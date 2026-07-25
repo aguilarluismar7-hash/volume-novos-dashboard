@@ -48,6 +48,20 @@
   .btn:hover{background:var(--navy-2);}
   .btn.secondary{background:#fff; color:var(--navy); border:1px solid var(--border);}
 
+  .seg-group{display:inline-flex; background:#eef1f5; border-radius:9px; padding:3px; gap:2px;}
+  .seg-btn{
+    border:none;
+    background:transparent;
+    padding:7px 16px;
+    border-radius:6px;
+    font-size:0.82rem;
+    font-weight:600;
+    color:var(--slate);
+    cursor:pointer;
+  }
+  .seg-btn:hover:not(.active){color:var(--navy);}
+  .seg-btn.active{background:#fff; color:var(--navy); box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+
   section.block{
     background:var(--card);
     border:1px solid var(--border);
@@ -165,11 +179,11 @@
 
   <div style="margin-bottom:16px; display:flex; gap:10px; align-items:center;">
     <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em;">Semestre</label>
-    <select id="fSemestre" onchange="renderTable()" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:0.85rem; background:#fff; color:var(--text);">
-      <option value="S1">1° Semestre</option>
-      <option value="S2">2° Semestre</option>
-      <option value="ANO">Ano (1°+2° Semestre)</option>
-    </select>
+    <div class="seg-group">
+      <button type="button" class="seg-btn active" data-sem="S1" onclick="setSemestre('S1', this)">1° Sem.</button>
+      <button type="button" class="seg-btn" data-sem="S2" onclick="setSemestre('S2', this)">2° Sem.</button>
+      <button type="button" class="seg-btn" data-sem="ANO" onclick="setSemestre('ANO', this)">Ano</button>
+    </div>
   </div>
 
   <div id="content">
@@ -273,6 +287,14 @@ function fmtValor(n, isPercent){
 }
 
 let currentRows = [];
+let currentSemestre = 'S1';
+
+function setSemestre(sem, btn){
+  currentSemestre = sem;
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTable();
+}
 
 async function loadAll(){
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
@@ -338,7 +360,7 @@ const ID_ROW_CLASS = {
 
 function renderTable(){
   const rows = currentRows;
-  const semestre = document.getElementById('fSemestre').value;
+  const semestre = currentSemestre;
 
   // Ordem única de (Nível1, Nível2), na sequência em que aparecem na planilha
   const order = [];
