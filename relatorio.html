@@ -74,6 +74,21 @@
     white-space:normal;
   }
   table.dre .col-indicador{text-align:center;}
+  .bar-wrap{display:flex; flex-direction:column; align-items:center; gap:4px;}
+  .bar-track{
+    width:48px;
+    height:5px;
+    background:#e2e8f0;
+    border-radius:3px;
+    overflow:hidden;
+    display:block;
+  }
+  .bar-fill{
+    display:block;
+    height:100%;
+    background:#3b82f6;
+    border-radius:3px;
+  }
   table.dre thead th{
     color:var(--muted);
     font-weight:700;
@@ -117,6 +132,19 @@
     font-weight:700;
   }
   /* Negativos ficam só entre parênteses, sem cor — evita poluição visual */
+  td.ritmo{font-style:italic;}
+  .ritmo-tag{
+    font-size:0.62rem;
+    font-style:normal;
+    font-weight:700;
+    color:var(--amber);
+    background:#fbf1de;
+    padding:1px 5px;
+    border-radius:4px;
+    text-transform:uppercase;
+    letter-spacing:0.02em;
+    margin-left:4px;
+  }
   .loading, .error{
     text-align:center;
     padding:60px 20px;
@@ -146,6 +174,15 @@
     </div>
   </header>
 
+  <div style="margin-bottom:16px; display:flex; gap:10px; align-items:center;">
+    <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em;">Semestre</label>
+    <select id="fSemestre" onchange="renderTable()" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:0.85rem; background:#fff; color:var(--text);">
+      <option value="S1">1° Semestre</option>
+      <option value="S2">2° Semestre</option>
+      <option value="ANO">Ano (1°+2° Semestre)</option>
+    </select>
+  </div>
+
   <div id="content">
     <div class="loading">Carregando dados da planilha…</div>
   </div>
@@ -153,17 +190,37 @@
 </div>
 
 <script>
-// Ordem preferida de exibição das colunas — períodos fora dessa lista aparecem
-// no final, na ordem em que forem encontrados na planilha.
-const PERIODO_ORDEM = [
-  'Realizado 1S 2025',
-  'Realizado 2S 2025',
-  'Realizado Ano 2025',
-  'Realizado 1S 2026',
-  'Budget 1S 2026',
-  'Budget 2S 2026',
-  'Forecast 2S 2026',
-];
+// Mapeia cada "tipo" de valor pro nome exato do período em cada semestre.
+// "Ano" nunca é um período próprio — é sempre 1S + 2S somados (só quando os dois existem).
+const PERIOD_MAP = {
+  real2025: { S1: 'Realizado 1S 2025', S2: 'Realizado 2S 2025' },
+  real2026: { S1: 'Realizado 1S 2026', S2: 'Realizado 2S 2026' },
+  budget:   { S1: 'Budget 1S 2026',    S2: 'Budget 2S 2026' },
+};
+
+function getValue(values, key, semestre, type, isPercent){
+  const vals = values[key] || {};
+  const map = PERIOD_MAP[type];
+  if(semestre === 'ANO'){
+    if(isPercent) return undefined; // somar % não faz sentido, precisa vir calculado à parte
+    const v1 = vals[map.S1], v2 = vals[map.S2];
+    if(v1 !== undefined && v2 !== undefined) return v1 + v2;
+    return undefined; // só mostra "Ano" quando os dois semestres existem
+  }
+  return vals[map[semestre]];
+}
+
+// Caso especial do Realizado 2026 na visão "Ano": se só o 1° Semestre existir
+// ainda (2° Semestre não fechou), mostra uma projeção de RITMO (1S × 2) em vez
+// de "-" — dá uma ideia de "no ritmo atual, onde a gente chegaria".
+function getValue2026Ano(values, key){
+  const map = PERIOD_MAP.real2026;
+  const vals = values[key] || {};
+  const v1 = vals[map.S1], v2 = vals[map.S2];
+  if(v1 !== undefined && v2 !== undefined) return { value: v1 + v2, ritmo: false };
+  if(v1 !== undefined) return { value: v1 * 2, ritmo: true };
+  return { value: undefined, ritmo: false };
+}
 
 function csvUrl(sheetName){
   return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
@@ -236,6 +293,8 @@ function fmtValor(n, isPercent){
   return n < 0 ? `(${abs})` : abs;
 }
 
+let currentRows = [];
+
 async function loadAll(){
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
   try{
@@ -261,7 +320,7 @@ async function loadAll(){
       throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Nível 2, ID, Valor) na aba TabDRE. Cabeçalho lido: ' + header.join(' | '));
     }
 
-    const rows = dreRows.slice(headerRowIndex + 1).map(r => ({
+    currentRows = dreRows.slice(headerRowIndex + 1).map(r => ({
       periodo: (r[idx.periodo]||'').trim(),
       nivel1: (r[idx.nivel1]||'').trim(),
       nivel2: (r[idx.nivel2]||'').trim(),
@@ -269,7 +328,7 @@ async function loadAll(){
       valor: toNumberSmart(r[idx.valor]),
     })).filter(r => r.periodo && r.nivel1);
 
-    render(rows);
+    renderTable();
 
     document.getElementById('lastUpdated').textContent =
       'Atualizado em ' + new Date().toLocaleString('pt-BR');
@@ -298,7 +357,10 @@ const ID_ROW_CLASS = {
   '8805': 'row-margem',             // Margem Oficina
 };
 
-function render(rows){
+function renderTable(){
+  const rows = currentRows;
+  const semestre = document.getElementById('fSemestre').value;
+
   // Ordem única de (Nível1, Nível2), na sequência em que aparecem na planilha
   const order = [];
   const seen = new Set();
@@ -341,75 +403,98 @@ function render(rows){
     }
   });
 
-  // Períodos presentes, na ordem preferida + extras no final
-  const periodsPresent = new Set(rows.map(r => r.periodo));
-  const periods = PERIODO_ORDEM.filter(p => periodsPresent.has(p))
-    .concat([...periodsPresent].filter(p => !PERIODO_ORDEM.includes(p)));
-
   const cell = (val, isPercent) => {
-    const cls = (val !== null && val < 0) ? ' class="neg"' : '';
+    const cls = (val !== null && val !== undefined && val < 0) ? ' class="neg"' : '';
     return `<td${cls}>${fmtValor(val, isPercent)}</td>`;
   };
 
-  const REAL_1S26 = 'Realizado 1S 2026';
-  const BUDGET_1S26 = 'Budget 1S 2026';
-  const REAL_1S25 = 'Realizado 1S 2025';
-
-  const atingCell = (parentVals, isPercent) => {
-    if(isPercent) return '<td class="col-indicador">-</td>';
-    const real = parentVals[REAL_1S26], budget = parentVals[BUDGET_1S26];
-    if(real === undefined || budget === undefined || !budget) return '<td class="col-indicador">-</td>';
-    const pct = (real / budget) * 100;
+  const atingCell = (real2026, budget, skip) => {
+    if(skip) return '<td class="col-indicador">-</td>';
+    if(real2026 === undefined || budget === undefined || !budget) return '<td class="col-indicador">-</td>';
+    const pct = (real2026 / budget) * 100;
     const width = Math.max(0, Math.min(100, pct));
     const texto = pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
-    return `<td class="col-indicador" style="background:linear-gradient(to right, rgba(59,130,246,0.22) ${width}%, transparent ${width}%);">${texto}</td>`;
+    return `<td class="col-indicador">
+      <div class="bar-wrap">
+        <span>${texto}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${width}%"></span></span>
+      </div>
+    </td>`;
   };
 
-  const crescCell = (parentVals, isPercent) => {
-    if(isPercent) return '<td class="col-indicador">-</td>';
-    const atual = parentVals[REAL_1S26], anterior = parentVals[REAL_1S25];
-    if(atual === undefined || anterior === undefined || !anterior) return '<td class="col-indicador">-</td>';
-    const pct = ((atual - anterior) / Math.abs(anterior)) * 100;
+  const crescCell = (real2026, real2025, skip) => {
+    if(skip) return '<td class="col-indicador">-</td>';
+    if(real2026 === undefined || real2025 === undefined || !real2025) return '<td class="col-indicador">-</td>';
+    const pct = ((real2026 - real2025) / Math.abs(real2025)) * 100;
     const texto = (pct>=0?'+':'') + pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
     return `<td class="col-indicador">${texto}</td>`;
+  };
+
+  const cell2026 = (val, isPercent, isRitmo) => {
+    if(val === null || val === undefined) return '<td>-</td>';
+    const negCls = val < 0 ? ' neg' : '';
+    if(isRitmo){
+      return `<td class="ritmo${negCls}">${fmtValor(val, isPercent)} <span class="ritmo-tag">ritmo</span></td>`;
+    }
+    return `<td class="${negCls.trim()}">${fmtValor(val, isPercent)}</td>`;
+  };
+
+  const rowValues = (key, isPercent) => {
+    const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
+    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
+    if(semestre === 'ANO' && !isPercent){
+      const r = getValue2026Ano(values, key);
+      return { v2025, vBudget, v2026: r.value, v2026Ritmo: r.ritmo };
+    }
+    const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
+    return { v2025, vBudget, v2026, v2026Ritmo: false };
   };
 
   let bodyHtml = '';
   blocks.forEach((block, i) => {
     const isPercent = block.nivel1.toLowerCase().startsWith('margem');
-    const parentVals = block.parentKey ? (values[block.parentKey] || {}) : {};
     const hasChildren = block.children.length > 0;
     const groupId = `g${i}`;
     const toggleIcon = hasChildren ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
     const colorClass = block.parentKey ? (ID_ROW_CLASS[idByKey[block.parentKey]] || '') : '';
     const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
     const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
+    // Totalizadores/Subtotais/Consolidadores já têm cor própria — a barrinha só
+    // aparece nas contas "normais" (sem classificação), pra não empilhar cor.
+    const skipIndicator = !!colorClass;
+
+    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined, v2026Ritmo:false};
 
     bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
-      periods.map(p => cell(parentVals[p] !== undefined ? parentVals[p] : null, isPercent)).join('') +
-      atingCell(parentVals, isPercent) +
-      crescCell(parentVals, isPercent) +
+      cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
+      cell2026(v.v2026 !== undefined ? v.v2026 : null, isPercent, v.v2026Ritmo) +
+      cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
+      atingCell(v.v2026, v.vBudget, isPercent || skipIndicator) +
+      crescCell(v.v2026, v.v2025, isPercent || skipIndicator) +
       `</tr>`;
 
     block.children.forEach(child => {
-      const vals = values[child.key] || {};
+      const cv = rowValues(child.key, isPercent);
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
-        periods.map(p => cell(vals[p] !== undefined ? vals[p] : null, isPercent)).join('') +
-        `<td class="col-indicador">-</td><td class="col-indicador">-</td>` +
+        cell(cv.v2025 !== undefined ? cv.v2025 : null, isPercent) +
+        cell2026(cv.v2026 !== undefined ? cv.v2026 : null, isPercent, cv.v2026Ritmo) +
+        cell(cv.vBudget !== undefined ? cv.vBudget : null, isPercent) +
+        atingCell(cv.v2026, cv.vBudget, isPercent) +
+        crescCell(cv.v2026, cv.v2025, isPercent) +
         `</tr>`;
     });
   });
 
-  const headHtml = `<th></th>` + periods.map(p => `<th>${p}</th>`).join('') + `<th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
-
+  const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : 'Ano (1°+2° Semestre)';
+  const label2026 = semestre === 'ANO' ? '2026 (até agora — ritmo)' : '2026';
 
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
-        <thead><tr>${headHtml}</tr></thead>
+        <thead><tr><th></th><th>2025</th><th>${label2026}</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado 1S 2026 ÷ Budget 1S 2026. Cresc. = Realizado 1S 2026 vs Realizado 1S 2025.</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = 2026 ÷ Budget. Cresc. = 2026 vs 2025. Quando marcado "ritmo", o 2° Semestre de 2026 ainda não fechou — o valor é o 1° Semestre × 2, uma projeção simples de ritmo, não o realizado de verdade.</div>
     </section>
   `;
 }
