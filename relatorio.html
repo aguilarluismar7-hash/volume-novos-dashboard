@@ -74,6 +74,8 @@
     white-space:normal;
   }
   table.dre .col-indicador{text-align:center;}
+  .cresc-pos{color:#2f8f5b;}
+  .cresc-neg{color:#c25b4a;}
   .bar-wrap{display:flex; flex-direction:column; align-items:center; gap:4px;}
   .bar-track{
     width:48px;
@@ -132,19 +134,6 @@
     font-weight:700;
   }
   /* Negativos ficam só entre parênteses, sem cor — evita poluição visual */
-  td.ritmo{font-style:italic;}
-  .ritmo-tag{
-    font-size:0.62rem;
-    font-style:normal;
-    font-weight:700;
-    color:var(--amber);
-    background:#fbf1de;
-    padding:1px 5px;
-    border-radius:4px;
-    text-transform:uppercase;
-    letter-spacing:0.02em;
-    margin-left:4px;
-  }
   .loading, .error{
     text-align:center;
     padding:60px 20px;
@@ -205,21 +194,11 @@ function getValue(values, key, semestre, type, isPercent){
     if(isPercent) return undefined; // somar % não faz sentido, precisa vir calculado à parte
     const v1 = vals[map.S1], v2 = vals[map.S2];
     if(v1 !== undefined && v2 !== undefined) return v1 + v2;
-    return undefined; // só mostra "Ano" quando os dois semestres existem
+    if(v1 !== undefined) return v1;
+    if(v2 !== undefined) return v2;
+    return undefined;
   }
   return vals[map[semestre]];
-}
-
-// Caso especial do Realizado 2026 na visão "Ano": se só o 1° Semestre existir
-// ainda (2° Semestre não fechou), mostra uma projeção de RITMO (1S × 2) em vez
-// de "-" — dá uma ideia de "no ritmo atual, onde a gente chegaria".
-function getValue2026Ano(values, key){
-  const map = PERIOD_MAP.real2026;
-  const vals = values[key] || {};
-  const v1 = vals[map.S1], v2 = vals[map.S2];
-  if(v1 !== undefined && v2 !== undefined) return { value: v1 + v2, ritmo: false };
-  if(v1 !== undefined) return { value: v1 * 2, ritmo: true };
-  return { value: undefined, ritmo: false };
 }
 
 function csvUrl(sheetName){
@@ -427,28 +406,15 @@ function renderTable(){
     if(real2026 === undefined || real2025 === undefined || !real2025) return '<td class="col-indicador">-</td>';
     const pct = ((real2026 - real2025) / Math.abs(real2025)) * 100;
     const texto = (pct>=0?'+':'') + pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
-    return `<td class="col-indicador">${texto}</td>`;
+    const cls = pct >= 0 ? 'cresc-pos' : 'cresc-neg';
+    return `<td class="col-indicador ${cls}">${texto}</td>`;
   };
 
-  const cell2026 = (val, isPercent, isRitmo) => {
-    if(val === null || val === undefined) return '<td>-</td>';
-    const negCls = val < 0 ? ' neg' : '';
-    if(isRitmo){
-      return `<td class="ritmo${negCls}">${fmtValor(val, isPercent)} <span class="ritmo-tag">ritmo</span></td>`;
-    }
-    return `<td class="${negCls.trim()}">${fmtValor(val, isPercent)}</td>`;
-  };
-
-  const rowValues = (key, isPercent) => {
-    const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
-    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
-    if(semestre === 'ANO' && !isPercent){
-      const r = getValue2026Ano(values, key);
-      return { v2025, vBudget, v2026: r.value, v2026Ritmo: r.ritmo };
-    }
-    const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
-    return { v2025, vBudget, v2026, v2026Ritmo: false };
-  };
+  const rowValues = (key, isPercent) => ({
+    v2025: getValue(values, key, semestre, 'real2025', isPercent),
+    v2026: getValue(values, key, semestre, 'real2026', isPercent),
+    vBudget: getValue(values, key, semestre, 'budget', isPercent),
+  });
 
   let bodyHtml = '';
   blocks.forEach((block, i) => {
@@ -463,11 +429,11 @@ function renderTable(){
     // aparece nas contas "normais" (sem classificação), pra não empilhar cor.
     const skipIndicator = !!colorClass;
 
-    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined, v2026Ritmo:false};
+    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
 
     bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
       cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
-      cell2026(v.v2026 !== undefined ? v.v2026 : null, isPercent, v.v2026Ritmo) +
+      cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
       cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
       atingCell(v.v2026, v.vBudget, isPercent || skipIndicator) +
       crescCell(v.v2026, v.v2025, isPercent || skipIndicator) +
@@ -477,7 +443,7 @@ function renderTable(){
       const cv = rowValues(child.key, isPercent);
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
         cell(cv.v2025 !== undefined ? cv.v2025 : null, isPercent) +
-        cell2026(cv.v2026 !== undefined ? cv.v2026 : null, isPercent, cv.v2026Ritmo) +
+        cell(cv.v2026 !== undefined ? cv.v2026 : null, isPercent) +
         cell(cv.vBudget !== undefined ? cv.vBudget : null, isPercent) +
         atingCell(cv.v2026, cv.vBudget, isPercent) +
         crescCell(cv.v2026, cv.v2025, isPercent) +
@@ -486,15 +452,14 @@ function renderTable(){
   });
 
   const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : 'Ano (1°+2° Semestre)';
-  const label2026 = semestre === 'ANO' ? '2026 (até agora — ritmo)' : '2026';
 
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
-        <thead><tr><th></th><th>2025</th><th>${label2026}</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
+        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = 2026 ÷ Budget. Cresc. = 2026 vs 2025. Quando marcado "ritmo", o 2° Semestre de 2026 ainda não fechou — o valor é o 1° Semestre × 2, uma projeção simples de ritmo, não o realizado de verdade.</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = 2026 ÷ Budget. Cresc. = 2026 vs 2025. "Ano" soma 1°+2° Semestre quando os dois existem; se só um existir, mostra esse valor.</div>
     </section>
   `;
 }
