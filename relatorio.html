@@ -222,21 +222,6 @@ function getValue(values, key, semestre, type, isPercent){
   return vals[map[semestre]];
 }
 
-// Tendência do ano cheio de 2026: usa o crescimento já realizado no 1° Semestre
-// (2026 vs 2025) e aplica esse mesmo ritmo sobre o 2° Semestre de 2025 — preserva
-// a sazonalidade de cada conta em vez de simplesmente dobrar o 1° Semestre.
-// Atenção: calculado direto em cada linha (inclusive Totais/Subtotais) — o Total
-// não é necessariamente igual à soma das Tendências das contas filhas.
-function getTendencia(values, key){
-  const vals = values[key] || {};
-  const real2025_S1 = vals[PERIOD_MAP.real2025.S1];
-  const real2025_S2 = vals[PERIOD_MAP.real2025.S2];
-  const real2026_S1 = vals[PERIOD_MAP.real2026.S1];
-  if(real2025_S1 === undefined || real2025_S2 === undefined || real2026_S1 === undefined || !real2025_S1) return undefined;
-  const crescimento = real2026_S1 / real2025_S1;
-  return real2026_S1 + real2025_S2 * crescimento;
-}
-
 function jsonUrl(sheetName){
   return `/api/sheet?tab=${encodeURIComponent(sheetName)}&format=json&_=${Date.now()}`;
 }
@@ -427,11 +412,8 @@ function renderTable(){
     const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
     const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
     const vBudget = getValue(values, key, semestre, 'budget', isPercent);
-    const vTendencia = (semestre === 'ANO' && !isPercent) ? getTendencia(values, key) : undefined;
-    return { v2025, v2026, vBudget, vTendencia };
+    return { v2025, v2026, vBudget };
   };
-
-  const showTendencia = semestre === 'ANO';
 
   let bodyHtml = '';
   blocks.forEach((block, i) => {
@@ -445,45 +427,37 @@ function renderTable(){
     // Margem (%) continua de fora do Ating./Cresc. — dividir % por % não faz sentido.
     const skipIndicator = isPercent;
 
-    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined, vTendencia:undefined};
-    const compareVal = showTendencia ? v.vTendencia : v.v2026;
+    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
 
     bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
       cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
       cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
       cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
-      (showTendencia ? cell(v.vTendencia !== undefined ? v.vTendencia : null, false) : '') +
-      atingCell(compareVal, v.vBudget, skipIndicator) +
-      crescCell(compareVal, v.v2025, skipIndicator) +
+      atingCell(v.v2026, v.vBudget, skipIndicator) +
+      crescCell(v.v2026, v.v2025, skipIndicator) +
       `</tr>`;
 
     block.children.forEach(child => {
       const cv = rowValues(child.key, isPercent);
-      const childCompareVal = showTendencia ? cv.vTendencia : cv.v2026;
       bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
         cell(cv.v2025 !== undefined ? cv.v2025 : null, isPercent) +
         cell(cv.v2026 !== undefined ? cv.v2026 : null, isPercent) +
         cell(cv.vBudget !== undefined ? cv.vBudget : null, isPercent) +
-        (showTendencia ? cell(cv.vTendencia !== undefined ? cv.vTendencia : null, false) : '') +
-        atingCell(childCompareVal, cv.vBudget, isPercent) +
-        crescCell(childCompareVal, cv.v2025, isPercent) +
+        atingCell(cv.v2026, cv.vBudget, isPercent) +
+        crescCell(cv.v2026, cv.v2025, isPercent) +
         `</tr>`;
     });
   });
 
   const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : 'Ano (1°+2° Semestre)';
-  const tendenciaHeader = showTendencia ? '<th>Tendência</th>' : '';
-  const tendenciaNote = showTendencia
-    ? ' Tendência = 1° Semestre 2026 + (2° Semestre 2025 × crescimento do 1° Semestre 26 vs 25) — projeção, calculada linha a linha (Totais não são necessariamente a soma das Tendências das contas filhas). No Ano, Ating./Cresc. comparam contra a Tendência, não contra o parcial realizado.'
-    : '';
 
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
-        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th>${tendenciaHeader}<th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
+        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.${tendenciaNote}</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.</div>
     </section>
   `;
 }
