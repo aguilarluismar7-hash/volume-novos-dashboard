@@ -238,12 +238,14 @@ function getTendencia(values, key){
 }
 
 function jsonUrl(sheetName){
-  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&format=json&headers=0&_=${Date.now()}`;
+  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&format=json&_=${Date.now()}`;
 }
 
 // Lê os dados no formato estruturado do Google (gviz JSON): cada célula vem
 // com seu valor exato e tipado (número continua número), sem nenhuma conversão
 // de texto — elimina de vez qualquer ambiguidade de milhar/decimal.
+// Com headers=1 (definido no sheet.js), o Google já separa o texto do
+// cabeçalho (table.cols) dos dados (table.rows), sem misturar tipos.
 async function fetchSheetJSON(name){
   const res = await fetch(jsonUrl(name), { cache: 'no-store' });
   if(!res.ok) throw new Error(`Não consegui ler a aba "${name}" (status ${res.status})`);
@@ -252,10 +254,11 @@ async function fetchSheetJSON(name){
   const match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
   if(!match) throw new Error(`Resposta inesperada da aba "${name}" — não encontrei o JSON.`);
   const json = JSON.parse(match[1]);
+  const header = (json.table.cols || []).map(c => c.label || '');
   const rows = (json.table.rows || []).map(r =>
     (r.c || []).map(cell => (cell === null || cell === undefined) ? null : cell.v)
   );
-  return rows;
+  return { header, rows };
 }
 
 function findCol(headerRow, name){
@@ -287,17 +290,8 @@ function setSemestre(sem, btn){
 async function loadAll(){
   document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
   try{
-    const dreRows = await fetchSheetJSON('TabDRE');
+    const { header, rows: dreRows } = await fetchSheetJSON('TabDRE');
 
-    // Procura a linha de cabeçalho em qualquer posição (robusto a linhas em
-    // branco ou de título antes dela), em vez de assumir que é sempre a linha 1.
-    const headerRowIndex = dreRows.findIndex(r =>
-      r.some(cell => String(cell||'').trim().toLowerCase() === 'periodo')
-    );
-    if(headerRowIndex === -1){
-      throw new Error('Não encontrei uma linha de cabeçalho contendo "Periodo" na aba TabDRE. Confira se essa coluna existe e está escrita assim.');
-    }
-    const header = dreRows[headerRowIndex];
     const idx = {
       periodo: findCol(header, 'Periodo'),
       nivel1: findCol(header, 'Nível 1'),
@@ -309,7 +303,7 @@ async function loadAll(){
       throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Nível 2, ID, Valor) na aba TabDRE. Cabeçalho lido: ' + header.join(' | '));
     }
 
-    currentRows = dreRows.slice(headerRowIndex + 1).map(r => ({
+    currentRows = dreRows.map(r => ({
       periodo: String(r[idx.periodo]||'').trim(),
       nivel1: String(r[idx.nivel1]||'').trim(),
       nivel2: String(r[idx.nivel2]||'').trim(),
@@ -350,11 +344,16 @@ function renderTable(){
   const rows = currentRows;
   const semestre = currentSemestre;
 
-  // Ordem única de (Nível1, Nível2), na sequência em que aparecem na planilha
+  // Ordem única de contas, na sequência em que aparecem na planilha.
+  // Chave = Nível 1 + ID (não o texto do Nível 2) — o ID é bem mais estável entre
+  // períodos do que o nome digitado da conta (acento, espaço, maiúscula variam).
+  // Só cai para Nível1+Nível2 nos raros casos sem ID nenhum.
+  const keyOf = r => r.nivel1 + '||' + (r.id ? r.id : r.nivel2);
+
   const order = [];
   const seen = new Set();
   rows.forEach(r => {
-    const key = r.nivel1 + '||' + r.nivel2;
+    const key = keyOf(r);
     if(!seen.has(key)){ seen.add(key); order.push({nivel1:r.nivel1, nivel2:r.nivel2, key}); }
   });
 
@@ -362,9 +361,13 @@ function renderTable(){
   const values = {};
   const idByKey = {};
   rows.forEach(r => {
-    const key = r.nivel1 + '||' + r.nivel2;
+    const key = keyOf(r);
     values[key] = values[key] || {};
-    values[key][r.periodo] = r.valor;
+    // Nunca deixa um valor em branco (linha "lixo" duplicada) apagar um valor real
+    // já lançado pra essa mesma conta/período.
+    if(r.valor !== null || values[key][r.periodo] === undefined){
+      values[key][r.periodo] = r.valor;
+    }
     if(r.id && !idByKey[key]) idByKey[key] = r.id;
   });
 

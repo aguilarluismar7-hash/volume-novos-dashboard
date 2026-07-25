@@ -18,9 +18,12 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // O parâmetro headers=0 só é necessário (e só é aplicado) no formato JSON —
-  // evita mexer no comportamento do CSV, que o dashboard de Volume já usa sem problema.
-  const headersParam = format === 'json' ? '&headers=0' : '';
+  // O parâmetro headers=1 só é necessário (e só é aplicado) no formato JSON —
+  // avisa o Google que a linha 1 é mesmo cabeçalho, evitando que ele tente
+  // "adivinhar" o tipo da coluna misturando o texto do cabeçalho com os dados
+  // numéricos (o que fazia "ID"/"Valor" sumirem do cabeçalho). Não mexe no CSV,
+  // que o dashboard de Volume já usa sem problema.
+  const headersParam = format === 'json' ? '&headers=1' : '';
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:${format}&sheet=${encodeURIComponent(tab)}${headersParam}&_=${Date.now()}`;
 
   try {
