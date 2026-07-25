@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:${format}&sheet=${encodeURIComponent(tab)}&_=${Date.now()}`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:${format}&sheet=${encodeURIComponent(tab)}&headers=0&_=${Date.now()}`;
 
   try {
     const response = await fetch(url, { cache: 'no-store' });
