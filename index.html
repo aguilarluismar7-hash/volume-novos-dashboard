@@ -143,6 +143,7 @@
   table.monthly tbody tr:last-child td{border-bottom:none;}
   td.dash{color:var(--slate-light);}
   td.suggested{color:var(--amber); font-style:italic; font-weight:600;}
+  td.forecast-diretor{color:#0f766e; font-style:italic; font-weight:600;}
   table.monthly td.green{color:var(--green);}
   table.monthly td.red{color:var(--red);}
 
@@ -325,6 +326,9 @@ async function loadAll(){
       valor: toNumber(r[vIdx.valor]),
     })).filter(r => !isNaN(r.n) && r.loja);
 
+    // TabVolume já contém 5 cenários: Realizado 2025, Realizado 2026, Budget 2026,
+    // Sugestão e Forecast Diretor 2026 — nenhuma aba extra é lida.
+
     // TabLojas: columns located by header name
     const lojaHeader = lojaRows[0] || [];
     const lIdx = {
@@ -492,9 +496,11 @@ function render(){
   </div>`;
 
   // Monthly table (always full year, not restricted by semester filter)
-  // Precompute monthly sums per cenário for the current filters
+  // Precompute monthly sums per cenário for the current filters — Sugestão e Forecast
+  // Diretor já vêm prontos direto da TabVolume (calculados/ajustados na TabRevisão),
+  // então entram na lista igual aos demais, sem lógica especial nenhuma.
   const monthlySums = {};
-  ['Realizado 2025','Realizado 2026','Budget 2026'].forEach(cen => {
+  ['Realizado 2025','Realizado 2026','Budget 2026','Sugestão','Forecast Diretor 2026'].forEach(cen => {
     monthlySums[cen] = {};
     MESES.forEach(m => {
       let val = null, has = false;
@@ -507,46 +513,24 @@ function render(){
     });
   });
 
-  // Crescimento do 1º semestre (2026 vs 2025), usado para projetar a Sugestão no 2º semestre
-  const s1Meses = MESES.filter(m => m.semestre === 'S1').map(m => m.abbr);
-  let s1_2025 = 0, s1_2026 = 0, hasS1_2025 = false;
-  s1Meses.forEach(ab => {
-    if(monthlySums['Realizado 2025'][ab].has){ s1_2025 += monthlySums['Realizado 2025'][ab].value; hasS1_2025 = true; }
-    if(monthlySums['Realizado 2026'][ab].has){ s1_2026 += monthlySums['Realizado 2026'][ab].value; }
-  });
-  const crescimentoS1 = (hasS1_2025 && s1_2025 > 0) ? (s1_2026 / s1_2025) : null;
-
-  // Sugestão: repete o Realizado no 1º semestre; no 2º semestre aplica o crescimento do
-  // semestre sobre o valor do mesmo mês em 2025 (preserva sazonalidade).
-  const sugestao = {};
-  MESES.forEach(m => {
-    if(m.semestre === 'S1'){
-      sugestao[m.abbr] = monthlySums['Realizado 2026'][m.abbr];
-    } else {
-      const base = monthlySums['Realizado 2025'][m.abbr];
-      sugestao[m.abbr] = (base.has && crescimentoS1 !== null)
-        ? {value: base.value * crescimentoS1, has:true}
-        : {value:null, has:false};
-    }
-  });
-
   const rowsDef = [
     {key:'Realizado 2025', label:'2025'},
     {key:'Realizado 2026', label:'2026 Realizado'},
     {key:'Budget 2026', label:'2026 Budget'},
     {key:'Sugestão', label:'2026 Sugestão*'},
+    {key:'Forecast Diretor 2026', label:'2026 Forecast Diretor**'},
   ];
   let tableRows = '';
   rowsDef.forEach(rd => {
-    const source = rd.key === 'Sugestão' ? sugestao : monthlySums[rd.key];
+    const source = monthlySums[rd.key];
     let total = 0, any = false;
     let s1Total = 0, hasS1 = false, s2Total = 0, hasS2 = false;
     const cells = MESES.map(m => {
       const cell = source[m.abbr];
-      const highlight = rd.key === 'Sugestão' && m.semestre === 'S2';
       const cls = [];
       if(!cell.has) cls.push('dash');
-      if(highlight) cls.push('suggested');
+      if(rd.key === 'Sugestão' && m.semestre === 'S2') cls.push('suggested');
+      if(rd.key === 'Forecast Diretor 2026' && m.semestre === 'S2') cls.push('forecast-diretor');
       const classAttr = cls.length ? ` class="${cls.join(' ')}"` : '';
       if(cell.has){
         total += cell.value; any = true;
@@ -575,7 +559,7 @@ function render(){
       <tbody>${tableRows}</tbody>
     </table>
     </div>
-    <div class="note">*Sugestão utiliza o crescimento do semestre e aplica no mês correspondente, necessário validar.<br>Cresc. % compara o 2° Semestre com o 1° Semestre dentro da própria linha.</div>
+    <div class="note">*Sugestão calculada e ajustável na planilha (TabRevisão), depois vai pra TabVolume.<br>**Forecast Diretor: preenchido manualmente na mesma planilha, loja por loja.<br>Cresc. % compara o 2° Semestre com o 1° Semestre dentro da própria linha.</div>
   </section>`;
 
   html += `<div class="charts">
