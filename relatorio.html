@@ -359,6 +359,15 @@ function renderProjecao(){
     values[r.nivel1][r.periodo] = r.valor;
   });
 
+  // Mesma linguagem visual do DRE, só que aqui por nome (a TabCenario não tem ID)
+  const NOME_ROW_CLASS = {
+    'Faturamento Líquido': 'row-consolidador',
+    'Custos Operacionais Totais': 'row-consolidador',
+    'Resultado Operacional Líquido': 'row-consolidador',
+    'EBITDA': 'row-ebitda',
+    'Resultado da Loja': 'row-resultado-loja',
+  };
+
   const fmt = n => (n === null || n === undefined) ? '-' :
     (n < 0 ? `(${Math.round(Math.abs(n)).toLocaleString('pt-BR')})` : Math.round(n).toLocaleString('pt-BR'));
 
@@ -383,7 +392,8 @@ function renderProjecao(){
       </div>`;
 
     const negCls = v => (v !== undefined && v !== null && v < 0) ? ' class="neg"' : '';
-    return `<tr>
+    const rowClass = NOME_ROW_CLASS[nome] || '';
+    return `<tr class="${rowClass}">
       <td>${nome}</td>
       <td${negCls(v2025)}>${fmt(v2025)}</td>
       <td${negCls(v2026)}>${fmt(v2026)}</td>
