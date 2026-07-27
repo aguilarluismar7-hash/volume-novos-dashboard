@@ -249,8 +249,17 @@ async function fetchSheetJSON(name){
   return { header, rows };
 }
 
+// Remove acentos pra comparação de cabeçalho não depender de digitação idêntica
+// (ex: "Nível 3" bate com "Nivel 3", "NÍVEL 3", etc.)
+function normalizeHeader(s){
+  return String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .trim().toLowerCase();
+}
+
 function findCol(headerRow, name){
-  return headerRow.findIndex(h => String(h||'').trim().toLowerCase() === name.toLowerCase());
+  const target = normalizeHeader(name);
+  return headerRow.findIndex(h => normalizeHeader(h) === target);
 }
 
 function fmtValor(n, isPercent){
