@@ -120,6 +120,9 @@
   tr.parent-row.no-children{cursor:default;}
   tr.child-row{display:none; background:#f7f8fa;}
   tr.child-row td:first-child{padding-left:34px; color:var(--slate); border-left:2px solid var(--border);}
+  tr.sub-parent-row{background:#f0f2f5; cursor:pointer;}
+  tr.sub-parent-row.no-children{cursor:default;}
+  tr.sub-parent-row td:first-child{font-weight:700; color:var(--navy);}
   tr.child-row.open{display:table-row;}
 
   /* Cores por tipo de linha, identificadas pelo ID Gerencial (mais confiável que o texto) */
@@ -287,11 +290,14 @@ async function loadAll(){
     if(Object.values(idx).some(i => i === -1)){
       throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Nível 2, ID, Valor) na aba TabDRE. Cabeçalho lido: ' + header.join(' | '));
     }
+    // Nível 3 é opcional (usado só nos blocos com 3 níveis, ex: Despesas Gerais e Administrativas)
+    const idxNivel3 = findCol(header, 'Nível 3');
 
     currentRows = dreRows.map(r => ({
       periodo: String(r[idx.periodo]||'').trim(),
       nivel1: String(r[idx.nivel1]||'').trim(),
       nivel2: String(r[idx.nivel2]||'').trim(),
+      nivel3: idxNivel3 === -1 ? '' : String(r[idxNivel3]||'').trim(),
       id: (r[idx.id] === null || r[idx.id] === undefined) ? '' : String(r[idx.id]).trim(),
       valor: (typeof r[idx.valor] === 'number') ? r[idx.valor] : null,
     })).filter(r => r.periodo && r.nivel1);
@@ -329,18 +335,10 @@ function renderTable(){
   const rows = currentRows;
   const semestre = currentSemestre;
 
-  // Ordem única de contas, na sequência em que aparecem na planilha.
-  // Chave = Nível 1 + ID (não o texto do Nível 2) — o ID é bem mais estável entre
-  // períodos do que o nome digitado da conta (acento, espaço, maiúscula variam).
-  // Só cai para Nível1+Nível2 nos raros casos sem ID nenhum.
-  const keyOf = r => r.nivel1 + '||' + (r.id ? r.id : r.nivel2);
-
-  const order = [];
-  const seen = new Set();
-  rows.forEach(r => {
-    const key = keyOf(r);
-    if(!seen.has(key)){ seen.add(key); order.push({nivel1:r.nivel1, nivel2:r.nivel2, key}); }
-  });
+  // Chave de uma linha: Nível1 + Nível2 + ID (ID é bem mais estável entre
+  // períodos do que texto digitado, mas sozinho ele pode se repetir em
+  // categorias diferentes — por isso entra junto com Nível1+Nível2).
+  const keyOf = r => r.nivel1 + '||' + r.nivel2 + '||' + (r.id ? r.id : r.nivel3);
 
   // Valores por chave e por período, e o ID (pra classificação de cor)
   const values = {};
@@ -356,28 +354,85 @@ function renderTable(){
     if(r.id && !idByKey[key]) idByKey[key] = r.id;
   });
 
-  // Remove linhas "lixo" (Nível2 vazio e nenhum valor em nenhum período)
-  const clean = order.filter(o => {
-    if(o.nivel2 !== '') return true;
-    const vals = values[o.key] || {};
-    return Object.values(vals).some(v => v !== null);
+  const rowValues = (key, isPercent) => ({
+    v2025: getValue(values, key, semestre, 'real2025', isPercent),
+    v2026: getValue(values, key, semestre, 'real2026', isPercent),
+    vBudget: getValue(values, key, semestre, 'budget', isPercent),
   });
 
-  // Agrupa por Nível 1
-  const blocks = [];
-  const blockByNivel1 = {};
-  clean.forEach(o => {
-    if(!blockByNivel1[o.nivel1]){
-      const block = {nivel1:o.nivel1, parentKey:null, children:[]};
-      blockByNivel1[o.nivel1] = block;
-      blocks.push(block);
+  // Soma os valores (v2025/v2026/vBudget) de uma lista de "rowValues" já calculados —
+  // usado pra somar sozinho o total de um grupo de 3 níveis (que não tem linha própria de total).
+  const sumValues = list => {
+    const sum = (field) => {
+      let total = 0, any = false;
+      list.forEach(v => { if(v[field] !== undefined){ total += v[field]; any = true; } });
+      return any ? total : undefined;
+    };
+    return { v2025: sum('v2025'), v2026: sum('v2026'), vBudget: sum('vBudget') };
+  };
+
+  // Ordem única de Nível 1, na sequência da planilha
+  const nivel1Order = [];
+  const nivel1Seen = new Set();
+  rows.forEach(r => {
+    if(!nivel1Seen.has(r.nivel1)){ nivel1Seen.add(r.nivel1); nivel1Order.push(r.nivel1); }
+  });
+
+  // Monta os blocos: "flat" = formato clássico (Nível2 Total + filhos diretos),
+  // "grouped" = 3 níveis (Nível2 = subcategoria, Nível3 = Total da subcategoria ou conta)
+  const blocks = nivel1Order.map(nivel1 => {
+    const groupRows = rows.filter(r => r.nivel1 === nivel1);
+    const hasNivel3 = groupRows.some(r => r.nivel3 !== '');
+
+    if(!hasNivel3){
+      const order = [];
+      const seen = new Set();
+      groupRows.forEach(r => {
+        const key = keyOf(r);
+        if(!seen.has(key)){ seen.add(key); order.push({label:r.nivel2, key}); }
+      });
+      const clean = order.filter(o => {
+        if(o.label !== '') return true;
+        const vals = values[o.key] || {};
+        return Object.values(vals).some(v => v !== null);
+      });
+      let parentKey = null;
+      const children = [];
+      clean.forEach(o => {
+        if(o.label === 'Total') parentKey = o.key;
+        else children.push(o);
+      });
+      return { nivel1, kind:'flat', parentKey, children };
     }
-    const block = blockByNivel1[o.nivel1];
-    if(o.nivel2 === 'Total'){
-      block.parentKey = o.key;
-    } else {
-      block.children.push(o);
-    }
+
+    // 3 níveis: agrupa por Nível 2 (subcategoria)
+    const nivel2Order = [];
+    const nivel2Seen = new Set();
+    groupRows.forEach(r => {
+      if(r.nivel2 !== '' && !nivel2Seen.has(r.nivel2)){ nivel2Seen.add(r.nivel2); nivel2Order.push(r.nivel2); }
+    });
+    const subgroups = nivel2Order.map(nivel2 => {
+      const subRows = groupRows.filter(r => r.nivel2 === nivel2);
+      const order = [];
+      const seen = new Set();
+      subRows.forEach(r => {
+        const key = keyOf(r);
+        if(!seen.has(key)){ seen.add(key); order.push({label:r.nivel3, key}); }
+      });
+      const clean = order.filter(o => {
+        if(o.label !== '') return true;
+        const vals = values[o.key] || {};
+        return Object.values(vals).some(v => v !== null);
+      });
+      let totalKey = null;
+      const children = [];
+      clean.forEach(o => {
+        if(o.label === 'Total') totalKey = o.key;
+        else children.push(o);
+      });
+      return { nivel2, totalKey, children };
+    });
+    return { nivel1, kind:'grouped', subgroups };
   });
 
   const cell = (val, isPercent) => {
@@ -408,44 +463,63 @@ function renderTable(){
     return `<td class="col-indicador ${cls}">${texto}</td>`;
   };
 
-  const rowValues = (key, isPercent) => {
-    const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
-    const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
-    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
-    return { v2025, v2026, vBudget };
+  const rowHtml = (label, v, isPercent, rowClass, onclick, toggleIcon, indent) => {
+    const style = indent ? ` style="padding-left:${indent}px"` : '';
+    return `<tr class="${rowClass}"${onclick}><td${style}>${toggleIcon}${label}</td>` +
+      cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
+      cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
+      cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
+      atingCell(v.v2026, v.vBudget, isPercent) +
+      crescCell(v.v2026, v.v2025, isPercent) +
+      `</tr>`;
   };
 
   let bodyHtml = '';
   blocks.forEach((block, i) => {
     const isPercent = block.nivel1.toLowerCase().startsWith('margem');
-    const hasChildren = block.children.length > 0;
     const groupId = `g${i}`;
-    const toggleIcon = hasChildren ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
-    const colorClass = block.parentKey ? (ID_ROW_CLASS[idByKey[block.parentKey]] || '') : '';
-    const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
-    const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
-    // Margem (%) continua de fora do Ating./Cresc. — dividir % por % não faz sentido.
-    const skipIndicator = isPercent;
 
-    const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
+    if(block.kind === 'flat'){
+      const hasChildren = block.children.length > 0;
+      const toggleIcon = hasChildren ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
+      const colorClass = block.parentKey ? (ID_ROW_CLASS[idByKey[block.parentKey]] || '') : '';
+      const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
+      const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
+      const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
 
-    bodyHtml += `<tr class="${rowClass}"${onclick}><td>${toggleIcon}${block.nivel1}</td>` +
-      cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
-      cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
-      cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
-      atingCell(v.v2026, v.vBudget, skipIndicator) +
-      crescCell(v.v2026, v.v2025, skipIndicator) +
-      `</tr>`;
+      bodyHtml += rowHtml(block.nivel1, v, isPercent, rowClass, onclick, toggleIcon, null);
 
-    block.children.forEach(child => {
-      const cv = rowValues(child.key, isPercent);
-      bodyHtml += `<tr class="child-row" data-group="${groupId}"><td>${child.nivel2}</td>` +
-        cell(cv.v2025 !== undefined ? cv.v2025 : null, isPercent) +
-        cell(cv.v2026 !== undefined ? cv.v2026 : null, isPercent) +
-        cell(cv.vBudget !== undefined ? cv.vBudget : null, isPercent) +
-        atingCell(cv.v2026, cv.vBudget, isPercent) +
-        crescCell(cv.v2026, cv.v2025, isPercent) +
-        `</tr>`;
+      block.children.forEach(child => {
+        const cv = rowValues(child.key, isPercent);
+        bodyHtml += rowHtml(child.label, cv, isPercent, 'child-row', ` data-group="${groupId}"`, '', null);
+      });
+      return;
+    }
+
+    // Bloco de 3 níveis: o total do Nível 1 é calculado somando o total de cada subgrupo
+    const subgroupTotals = block.subgroups
+      .filter(sg => sg.totalKey)
+      .map(sg => rowValues(sg.totalKey, false));
+    const groupTotal = sumValues(subgroupTotals);
+    const hasSubgroups = block.subgroups.length > 0;
+    const toggleIcon = hasSubgroups ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
+    const onclick = hasSubgroups ? ` onclick="toggleGroup('${groupId}', this)"` : '';
+
+    bodyHtml += rowHtml(block.nivel1, groupTotal, false, `parent-row${hasSubgroups?'':' no-children'}`, onclick, toggleIcon, null);
+
+    block.subgroups.forEach((sg, j) => {
+      const subGroupId = `${groupId}-${j}`;
+      const hasChildren = sg.children.length > 0;
+      const subToggle = hasChildren ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
+      const subOnclick = hasChildren ? ` onclick="toggleGroup('${subGroupId}', this)"` : '';
+      const sv = sg.totalKey ? rowValues(sg.totalKey, false) : {v2025:undefined, v2026:undefined, vBudget:undefined};
+
+      bodyHtml += rowHtml(sg.nivel2, sv, false, `child-row sub-parent-row${hasChildren?'':' no-children'}`, ` data-group="${groupId}"${subOnclick}`, subToggle, 34);
+
+      sg.children.forEach(child => {
+        const cv = rowValues(child.key, false);
+        bodyHtml += rowHtml(child.label, cv, false, 'child-row', ` data-group="${subGroupId}"`, '', 58);
+      });
     });
   });
 
@@ -457,7 +531,7 @@ function renderTable(){
         <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas de Nível 2. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.</div>
     </section>
   `;
 }
@@ -467,6 +541,14 @@ function toggleGroup(groupId, headerRow){
   const icon = headerRow.querySelector('.toggle');
   const willOpen = !rows[0]?.classList.contains('open');
   rows.forEach(r => r.classList.toggle('open', willOpen));
+  if(!willOpen){
+    // Ao fechar, fecha também qualquer sub-nível aberto dentro dele
+    document.querySelectorAll(`tr[data-group^="${groupId}-"]`).forEach(r => r.classList.remove('open'));
+    rows.forEach(r => {
+      const subIcon = r.querySelector('.toggle');
+      if(subIcon && subIcon.textContent === '▾') subIcon.textContent = '▸';
+    });
+  }
   if(icon) icon.textContent = willOpen ? '▾' : '▸';
 }
 
