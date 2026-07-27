@@ -176,24 +176,31 @@
     <div class="status">
       <span id="lastUpdated">Carregando…</span>
       <div style="display:flex; gap:8px;">
-        <button class="btn" onclick="loadAll()">Atualizar dados</button>
+        <button class="btn" onclick="atualizarTudo()">Atualizar dados</button>
       </div>
     </div>
   </header>
 
-  <div style="margin-bottom:16px; display:flex; gap:10px; align-items:center;">
-    <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em;">Semestre</label>
+  <div style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
+    <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em; width:70px;">Semestre</label>
     <div class="seg-group">
       <button type="button" class="seg-btn active" data-sem="S1" onclick="setSemestre('S1', this)">1° Sem.</button>
       <button type="button" class="seg-btn" data-sem="S2" onclick="setSemestre('S2', this)">2° Sem.</button>
       <button type="button" class="seg-btn" data-sem="ANO" onclick="setSemestre('ANO', this)">Ano</button>
+    </div>
+  </div>
+  <div style="margin-bottom:16px; display:flex; gap:10px; align-items:center;">
+    <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em; width:70px;">Visão</label>
+    <div class="seg-group">
       <button type="button" class="seg-btn" data-sem="GERAL" onclick="setSemestre('GERAL', this)">Geral</button>
+      <button type="button" class="seg-btn" data-sem="PROJECAO" onclick="setSemestre('PROJECAO', this)">Projeção</button>
     </div>
   </div>
 
   <div id="content">
     <div class="loading">Carregando dados da planilha…</div>
   </div>
+  <div id="content-projecao" style="display:none;"></div>
 </div>
 </div>
 
@@ -285,12 +292,125 @@ function fmtValor(n, isPercent){
 
 let currentRows = [];
 let currentSemestre = 'S1';
+let projecaoRows = null; // cache — só busca a TabCenario na primeira vez que abrir
 
 function setSemestre(sem, btn){
   currentSemestre = sem;
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  renderTable();
+
+  const dreEl = document.getElementById('content');
+  const projEl = document.getElementById('content-projecao');
+
+  if(sem === 'PROJECAO'){
+    dreEl.style.display = 'none';
+    projEl.style.display = '';
+    loadProjecao();
+  } else {
+    dreEl.style.display = '';
+    projEl.style.display = 'none';
+    renderTable();
+  }
+}
+
+// Ordem fixa das linhas da Projeção (segue a ordem natural do DRE)
+const ORDEM_PROJECAO = [
+  'Faturamento Líquido',
+  'Custos Operacionais Totais',
+  'Resultado Operacional Líquido',
+  'Despesas Gerais e Administrativas',
+  'EBITDA',
+  'Outras Receitas e Despesas',
+  'Resultado da Loja',
+];
+
+async function loadProjecao(){
+  const el = document.getElementById('content-projecao');
+  if(projecaoRows){ renderProjecao(); return; }
+  el.innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
+  try{
+    const { header, rows: raw } = await fetchSheetJSON('TabCenario');
+    const idx = {
+      periodo: findCol(header, 'Periodo'),
+      nivel1: findCol(header, 'Nível 1'),
+      valor: findCol(header, 'Valor'),
+    };
+    if(Object.values(idx).some(i => i === -1)){
+      throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Valor) na aba TabCenario. Cabeçalho lido: ' + header.join(' | '));
+    }
+    projecaoRows = raw.map(r => ({
+      periodo: String(r[idx.periodo]||'').trim(),
+      nivel1: String(r[idx.nivel1]||'').trim(),
+      valor: (typeof r[idx.valor] === 'number') ? r[idx.valor] : null,
+    })).filter(r => r.periodo && r.nivel1);
+    renderProjecao();
+    document.getElementById('lastUpdated').textContent =
+      'Atualizado em ' + new Date().toLocaleString('pt-BR');
+  } catch(err){
+    el.innerHTML = `<div class="error">Não consegui carregar a Projeção.<br>${err.message}</div>`;
+  }
+}
+
+function renderProjecao(){
+  const el = document.getElementById('content-projecao');
+  const values = {};
+  projecaoRows.forEach(r => {
+    values[r.nivel1] = values[r.nivel1] || {};
+    values[r.nivel1][r.periodo] = r.valor;
+  });
+
+  const fmt = n => (n === null || n === undefined) ? '-' :
+    (n < 0 ? `(${Math.round(Math.abs(n)).toLocaleString('pt-BR')})` : Math.round(n).toLocaleString('pt-BR'));
+
+  const linhas = ORDEM_PROJECAO.filter(nome => values[nome]).map(nome => {
+    const v2025 = values[nome]['Projeção 2025'];
+    const v2026 = values[nome]['Projeção 2026'];
+    const vBudget = values[nome]['Budget 2026'];
+
+    const cresc = (v2025 !== undefined && v2026 !== undefined && v2025)
+      ? ((v2026 - v2025) / Math.abs(v2025)) * 100 : null;
+    const ating = (v2026 !== undefined && vBudget !== undefined && vBudget)
+      ? (v2026 / vBudget) * 100 : null;
+
+    const crescTxt = cresc === null ? '-' : (cresc>=0?'+':'') + cresc.toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%';
+    const crescCls = cresc === null ? '' : (cresc >= 0 ? 'cresc-pos' : 'cresc-neg');
+    const atingWidth = ating === null ? 0 : Math.max(0, Math.min(100, ating));
+    const atingTxt = ating === null ? '-' : ating.toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%';
+    const atingHtml = ating === null ? '-' : `
+      <div class="bar-wrap">
+        <span>${atingTxt}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${atingWidth}%"></span></span>
+      </div>`;
+
+    const negCls = v => (v !== undefined && v !== null && v < 0) ? ' class="neg"' : '';
+    return `<tr>
+      <td>${nome}</td>
+      <td${negCls(v2025)}>${fmt(v2025)}</td>
+      <td${negCls(v2026)}>${fmt(v2026)}</td>
+      <td${negCls(vBudget)}>${fmt(vBudget)}</td>
+      <td class="col-indicador ${crescCls}">${crescTxt}</td>
+      <td class="col-indicador">${atingHtml}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <section class="block">
+      <table class="dre">
+        <thead><tr><th></th><th>2025</th><th>Projeção 2026</th><th>Budget 2026</th><th class="col-indicador">Cresc.</th><th class="col-indicador">Ating.</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+      <div class="note">Projeção calculada fora do site (Excel) e representada aqui como está — sem recálculo automático.<br>Cresc. = Projeção 2026 vs 2025. Ating. = Projeção 2026 ÷ Budget 2026.</div>
+    </section>
+  `;
+}
+
+async function atualizarTudo(){
+  if(currentSemestre === 'PROJECAO'){
+    projecaoRows = null; // força buscar de novo
+    await loadProjecao();
+  } else {
+    await loadAll();
+  }
 }
 
 async function loadAll(){
