@@ -567,7 +567,7 @@ function render(){
       <div class="chart-box"><canvas id="chartTop10"></canvas></div>
     </div>
     <div class="block">
-      <h2>Sugestão x Forecast Diretor — 2° Semestre (consolidado)</h2>
+      <h2>Top 10 lojas — Maior redução (Sugestão vs Forecast Diretor)</h2>
       <div class="chart-box"><canvas id="chartReducao"></canvas></div>
       <div id="reducaoResumo" style="text-align:center; font-size:0.85rem; color:var(--muted); margin-top:8px;"></div>
     </div>
@@ -611,32 +611,39 @@ function renderTop10Chart(f, mesesAtivos){
 }
 
 function renderReducaoChart(){
-  // Painel travado: sempre o total geral (todas as lojas, todos os canais),
-  // sem depender dos filtros ativos na tela. Só olha o 2° Semestre, que é onde
-  // a Sugestão e o Forecast Diretor podem divergir (1° Semestre é igual nos dois).
+  // Painel travado: sempre olha todas as lojas/canais, sem depender dos filtros
+  // ativos na tela. Só o 2° Semestre, que é onde Sugestão e Forecast Diretor
+  // podem divergir (1° Semestre é igual nos dois).
   const s2Meses = MESES.filter(m => m.semestre === 'S2').map(m => m.abbr);
+  const porLoja = {}; // n -> {sugestao, forecast, loja}
   let totalSugestao = 0, totalForecast = 0, hasSugestao = false, hasForecast = false;
+
   volumeData.forEach(row => {
     if(!s2Meses.includes(row.mes) || row.valor === null) return;
-    if(row.cenario === 'Sugestão'){ totalSugestao += row.valor; hasSugestao = true; }
-    if(row.cenario === 'Forecast Diretor 2026'){ totalForecast += row.valor; hasForecast = true; }
+    if(row.cenario !== 'Sugestão' && row.cenario !== 'Forecast Diretor 2026') return;
+    porLoja[row.n] = porLoja[row.n] || {sugestao:0, forecast:0, loja: row.loja};
+    if(row.cenario === 'Sugestão'){ porLoja[row.n].sugestao += row.valor; totalSugestao += row.valor; hasSugestao = true; }
+    else { porLoja[row.n].forecast += row.valor; totalForecast += row.valor; hasForecast = true; }
   });
+
+  // Top 10 maiores reduções (Forecast menor que a Sugestão), ordenado do mais negativo
+  const diffs = Object.values(porLoja)
+    .map(d => ({label: d.loja, diff: d.forecast - d.sugestao}))
+    .sort((a,b) => a.diff - b.diff)
+    .slice(0, 10);
 
   const ctx = document.getElementById('chartReducao');
   if(charts.reducao) charts.reducao.destroy();
   charts.reducao = new Chart(ctx, {
     type:'bar',
     data:{
-      labels: ['2° Semestre 2026'],
-      datasets:[
-        {label:'Sugestão', data:[hasSugestao?totalSugestao:0], backgroundColor:'#8fa0b8', borderRadius:4},
-        {label:'Forecast Diretor', data:[hasForecast?totalForecast:0], backgroundColor:'#0f2440', borderRadius:4},
-      ]
+      labels: diffs.map(d => d.label),
+      datasets:[{ data: diffs.map(d => d.diff), backgroundColor: diffs.map(d => d.diff < 0 ? '#c8442d' : '#1f8a5f'), borderRadius:4 }]
     },
     options:{
       indexAxis:'y',
       responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{position:'top', labels:{boxWidth:12}}},
+      plugins:{legend:{display:false}},
       scales:{ x:{ grid:{color:'#eef1f5'} }, y:{ grid:{display:false} } }
     }
   });
@@ -647,7 +654,7 @@ function renderReducaoChart(){
     const pct = totalSugestao ? (diff / totalSugestao) * 100 : null;
     const sinal = diff >= 0 ? '+' : '';
     const cor = diff < 0 ? 'var(--red)' : 'var(--green)';
-    resumoEl.innerHTML = `Sugestão: <strong>${fmt(totalSugestao)}</strong> unid. &nbsp;·&nbsp; Forecast Diretor: <strong>${fmt(totalForecast)}</strong> unid. &nbsp;·&nbsp; Diferença: <strong style="color:${cor}">${sinal}${fmt(diff)} (${sinal}${pct.toFixed(1)}%)</strong>`;
+    resumoEl.innerHTML = `Total geral — Sugestão: <strong>${fmt(totalSugestao)}</strong> unid. &nbsp;·&nbsp; Forecast Diretor: <strong>${fmt(totalForecast)}</strong> unid. &nbsp;·&nbsp; Diferença: <strong style="color:${cor}">${sinal}${fmt(diff)} (${sinal}${pct.toFixed(1)}%)</strong>`;
   } else {
     resumoEl.textContent = 'Aguardando dados de Sugestão e/ou Forecast Diretor na TabVolume.';
   }
