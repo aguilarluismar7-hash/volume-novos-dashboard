@@ -187,6 +187,7 @@
       <button type="button" class="seg-btn active" data-sem="S1" onclick="setSemestre('S1', this)">1° Sem.</button>
       <button type="button" class="seg-btn" data-sem="S2" onclick="setSemestre('S2', this)">2° Sem.</button>
       <button type="button" class="seg-btn" data-sem="ANO" onclick="setSemestre('ANO', this)">Ano</button>
+      <button type="button" class="seg-btn" data-sem="GERAL" onclick="setSemestre('GERAL', this)">Geral</button>
     </div>
   </div>
 
@@ -204,6 +205,14 @@ const PERIOD_MAP = {
   real2026: { S1: 'Realizado 1S 2026', S2: 'Realizado 2S 2026' },
   budget:   { S1: 'Budget 1S 2026',    S2: 'Budget 2S 2026' },
 };
+
+// Ordem "lógica" usada no modo Geral — períodos fora dessa lista (ex: Forecast,
+// quando existir) aparecem no final, na ordem em que forem encontrados na planilha.
+const PERIODO_ORDEM_GERAL = [
+  'Realizado 1S 2025', 'Realizado 2S 2025',
+  'Realizado 1S 2026', 'Realizado 2S 2026',
+  'Budget 1S 2026', 'Budget 2S 2026',
+];
 
 function getValue(values, key, semestre, type, isPercent){
   const vals = values[key] || {};
@@ -444,6 +453,13 @@ function renderTable(){
     return { nivel1, kind:'grouped', subgroups };
   });
 
+  const isGeral = semestre === 'GERAL';
+
+  // Períodos detectados, na ordem lógica — só usado no modo Geral
+  const periodsPresent = new Set(rows.map(r => r.periodo));
+  const periodosGeral = PERIODO_ORDEM_GERAL.filter(p => periodsPresent.has(p))
+    .concat([...periodsPresent].filter(p => !PERIODO_ORDEM_GERAL.includes(p)));
+
   const cell = (val, isPercent) => {
     const cls = (val !== null && val !== undefined && val < 0) ? ' class="neg"' : '';
     return `<td${cls}>${fmtValor(val, isPercent)}</td>`;
@@ -472,15 +488,44 @@ function renderTable(){
     return `<td class="col-indicador ${cls}">${texto}</td>`;
   };
 
-  const rowHtml = (label, v, isPercent, rowClass, onclick, toggleIcon, indent) => {
+  const rowHtml = (label, cellsHtml, rowClass, onclick, toggleIcon, indent) => {
     const style = indent ? ` style="padding-left:${indent}px"` : '';
-    return `<tr class="${rowClass}"${onclick}><td${style}>${toggleIcon}${label}</td>` +
-      cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
+    return `<tr class="${rowClass}"${onclick}><td${style}>${toggleIcon}${label}</td>${cellsHtml}</tr>`;
+  };
+
+  // Célula(s) de uma única conta (chave). No modo Geral, uma coluna por período
+  // detectado; nos outros modos, 2025/2026/Budget + Ating./Cresc.
+  const cellsForKey = (key, isPercent) => {
+    if(isGeral){
+      return periodosGeral.map(p => cell(key ? ((values[key]||{})[p] ?? null) : null, isPercent)).join('');
+    }
+    const v = key ? rowValues(key, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
+    return cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
       cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
       cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
       atingCell(v.v2026, v.vBudget, isPercent) +
-      crescCell(v.v2026, v.v2025, isPercent) +
-      `</tr>`;
+      crescCell(v.v2026, v.v2025, isPercent);
+  };
+
+  // Célula(s) somando várias chaves (usado no total calculado da Nível 1 de 3 níveis)
+  const cellsForSum = (keys, isPercent) => {
+    if(isGeral){
+      return periodosGeral.map(p => {
+        let total = 0, any = false;
+        keys.forEach(k => {
+          const v = (values[k]||{})[p];
+          if(v !== undefined && v !== null){ total += v; any = true; }
+        });
+        return cell(any ? total : null, isPercent);
+      }).join('');
+    }
+    const list = keys.map(k => rowValues(k, isPercent));
+    const sum = sumValues(list);
+    return cell(sum.v2025 !== undefined ? sum.v2025 : null, isPercent) +
+      cell(sum.v2026 !== undefined ? sum.v2026 : null, isPercent) +
+      cell(sum.vBudget !== undefined ? sum.vBudget : null, isPercent) +
+      atingCell(sum.v2026, sum.vBudget, isPercent) +
+      crescCell(sum.v2026, sum.v2025, isPercent);
   };
 
   let bodyHtml = '';
@@ -494,53 +539,50 @@ function renderTable(){
       const colorClass = block.parentKey ? (ID_ROW_CLASS[idByKey[block.parentKey]] || '') : '';
       const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
       const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
-      const v = block.parentKey ? rowValues(block.parentKey, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
 
-      bodyHtml += rowHtml(block.nivel1, v, isPercent, rowClass, onclick, toggleIcon, null);
+      bodyHtml += rowHtml(block.nivel1, cellsForKey(block.parentKey, isPercent), rowClass, onclick, toggleIcon, null);
 
       block.children.forEach(child => {
-        const cv = rowValues(child.key, isPercent);
-        bodyHtml += rowHtml(child.label, cv, isPercent, 'child-row', ` data-group="${groupId}"`, '', null);
+        bodyHtml += rowHtml(child.label, cellsForKey(child.key, isPercent), 'child-row', ` data-group="${groupId}"`, '', null);
       });
       return;
     }
 
     // Bloco de 3 níveis: o total do Nível 1 é calculado somando o total de cada subgrupo
-    const subgroupTotals = block.subgroups
-      .filter(sg => sg.totalKey)
-      .map(sg => rowValues(sg.totalKey, false));
-    const groupTotal = sumValues(subgroupTotals);
+    const subgroupKeys = block.subgroups.filter(sg => sg.totalKey).map(sg => sg.totalKey);
     const hasSubgroups = block.subgroups.length > 0;
     const toggleIcon = hasSubgroups ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
     const onclick = hasSubgroups ? ` onclick="toggleGroup('${groupId}', this)"` : '';
 
-    bodyHtml += rowHtml(block.nivel1, groupTotal, false, `parent-row${hasSubgroups?'':' no-children'}`, onclick, toggleIcon, null);
+    bodyHtml += rowHtml(block.nivel1, cellsForSum(subgroupKeys, false), `parent-row${hasSubgroups?'':' no-children'}`, onclick, toggleIcon, null);
 
     block.subgroups.forEach((sg, j) => {
       const subGroupId = `${groupId}-${j}`;
       const hasChildren = sg.children.length > 0;
       const subToggle = hasChildren ? '<span class="toggle">▸</span>' : '<span class="toggle"></span>';
       const subOnclick = hasChildren ? ` onclick="toggleGroup('${subGroupId}', this)"` : '';
-      const sv = sg.totalKey ? rowValues(sg.totalKey, false) : {v2025:undefined, v2026:undefined, vBudget:undefined};
 
-      bodyHtml += rowHtml(sg.nivel2, sv, false, `child-row sub-parent-row${hasChildren?'':' no-children'}`, ` data-group="${groupId}"${subOnclick}`, subToggle, 34);
+      bodyHtml += rowHtml(sg.nivel2, cellsForKey(sg.totalKey, false), `child-row sub-parent-row${hasChildren?'':' no-children'}`, ` data-group="${groupId}"${subOnclick}`, subToggle, 34);
 
       sg.children.forEach(child => {
-        const cv = rowValues(child.key, false);
-        bodyHtml += rowHtml(child.label, cv, false, 'child-row', ` data-group="${subGroupId}"`, '', 58);
+        bodyHtml += rowHtml(child.label, cellsForKey(child.key, false), 'child-row', ` data-group="${subGroupId}"`, '', 58);
       });
     });
   });
 
-  const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : 'Ano (1°+2° Semestre)';
+  const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : semestre === 'ANO' ? 'Ano (1°+2° Semestre)' : 'Geral (todos os períodos)';
+  const headHtml = isGeral
+    ? `<th></th>${periodosGeral.map(p => `<th>${p}</th>`).join('')}`
+    : `<th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
+  const noteExtra = isGeral ? '' : ' Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.';
 
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
-        <thead><tr><th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th></tr></thead>
+        <thead><tr>${headHtml}</tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas. Valores negativos aparecem entre parênteses.<br>Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.</div>
+      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas. Valores negativos aparecem entre parênteses.${noteExtra}</div>
     </section>
   `;
 }
