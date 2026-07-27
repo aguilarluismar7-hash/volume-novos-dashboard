@@ -235,7 +235,7 @@ const MESES = [
 
 let volumeData = [];   // {n, loja, canal, cenario, mes, valor}
 let lojasMap = {};      // n -> {loja, estado}
-let charts = {top10:null, estado:null};
+let charts = {top10:null, reducao:null};
 
 function csvUrl(sheetName){
   // Same-origin call to our own serverless function (api/sheet.js), which fetches
@@ -567,15 +567,16 @@ function render(){
       <div class="chart-box"><canvas id="chartTop10"></canvas></div>
     </div>
     <div class="block">
-      <h2>Comparativo por estado — 2025 vs 2026</h2>
-      <div class="chart-box"><canvas id="chartEstado"></canvas></div>
+      <h2>Sugestão x Forecast Diretor — 2° Semestre (consolidado)</h2>
+      <div class="chart-box"><canvas id="chartReducao"></canvas></div>
+      <div id="reducaoResumo" style="text-align:center; font-size:0.85rem; color:var(--muted); margin-top:8px;"></div>
     </div>
   </div>`;
 
   document.getElementById('content').innerHTML = html;
 
   renderTop10Chart(f, mesesAtivos);
-  renderEstadoChart(f, mesesAtivos);
+  renderReducaoChart();
 }
 
 function renderTop10Chart(f, mesesAtivos){
@@ -609,38 +610,47 @@ function renderTop10Chart(f, mesesAtivos){
   });
 }
 
-function renderEstadoChart(f, mesesAtivos){
-  const byEstado = {};
+function renderReducaoChart(){
+  // Painel travado: sempre o total geral (todas as lojas, todos os canais),
+  // sem depender dos filtros ativos na tela. Só olha o 2° Semestre, que é onde
+  // a Sugestão e o Forecast Diretor podem divergir (1° Semestre é igual nos dois).
+  const s2Meses = MESES.filter(m => m.semestre === 'S2').map(m => m.abbr);
+  let totalSugestao = 0, totalForecast = 0, hasSugestao = false, hasForecast = false;
   volumeData.forEach(row => {
-    if(!['Realizado 2025','Realizado 2026'].includes(row.cenario)) return;
-    if(!matchesBaseFilters(row, f, {ignoreLoja:true, ignoreEstado:true})) return;
-    if(!mesesAtivos.includes(row.mes)) return;
-    if(row.valor === null) return;
-    const info = lojasMap[row.n];
-    const estado = info ? info.estado : 'N/D';
-    byEstado[estado] = byEstado[estado] || {2025:0, 2026:0};
-    if(row.cenario === 'Realizado 2025') byEstado[estado]['2025'] += row.valor;
-    else byEstado[estado]['2026'] += row.valor;
+    if(!s2Meses.includes(row.mes) || row.valor === null) return;
+    if(row.cenario === 'Sugestão'){ totalSugestao += row.valor; hasSugestao = true; }
+    if(row.cenario === 'Forecast Diretor 2026'){ totalForecast += row.valor; hasForecast = true; }
   });
-  const estados = Object.keys(byEstado).sort();
 
-  const ctx = document.getElementById('chartEstado');
-  if(charts.estado) charts.estado.destroy();
-  charts.estado = new Chart(ctx, {
+  const ctx = document.getElementById('chartReducao');
+  if(charts.reducao) charts.reducao.destroy();
+  charts.reducao = new Chart(ctx, {
     type:'bar',
     data:{
-      labels: estados,
+      labels: ['2° Semestre 2026'],
       datasets:[
-        {label:'2025', data: estados.map(e=>byEstado[e]['2025']), backgroundColor:'#a9b6c8', borderRadius:4},
-        {label:'2026', data: estados.map(e=>byEstado[e]['2026']), backgroundColor:'#0f2440', borderRadius:4},
+        {label:'Sugestão', data:[hasSugestao?totalSugestao:0], backgroundColor:'#8fa0b8', borderRadius:4},
+        {label:'Forecast Diretor', data:[hasForecast?totalForecast:0], backgroundColor:'#0f2440', borderRadius:4},
       ]
     },
     options:{
+      indexAxis:'y',
       responsive:true, maintainAspectRatio:false,
       plugins:{legend:{position:'top', labels:{boxWidth:12}}},
-      scales:{ x:{ grid:{display:false} }, y:{ grid:{color:'#eef1f5'} } }
+      scales:{ x:{ grid:{color:'#eef1f5'} }, y:{ grid:{display:false} } }
     }
   });
+
+  const resumoEl = document.getElementById('reducaoResumo');
+  if(hasSugestao && hasForecast){
+    const diff = totalForecast - totalSugestao;
+    const pct = totalSugestao ? (diff / totalSugestao) * 100 : null;
+    const sinal = diff >= 0 ? '+' : '';
+    const cor = diff < 0 ? 'var(--red)' : 'var(--green)';
+    resumoEl.innerHTML = `Sugestão: <strong>${fmt(totalSugestao)}</strong> unid. &nbsp;·&nbsp; Forecast Diretor: <strong>${fmt(totalForecast)}</strong> unid. &nbsp;·&nbsp; Diferença: <strong style="color:${cor}">${sinal}${fmt(diff)} (${sinal}${pct.toFixed(1)}%)</strong>`;
+  } else {
+    resumoEl.textContent = 'Aguardando dados de Sugestão e/ou Forecast Diretor na TabVolume.';
+  }
 }
 
 loadAll();
