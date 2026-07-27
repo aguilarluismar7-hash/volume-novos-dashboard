@@ -377,7 +377,7 @@ function renderProjecao(){
     const vBudget = values[nome]['Budget 2026'];
 
     const cresc = (v2025 !== undefined && v2026 !== undefined && v2025)
-      ? ((v2026 - v2025) / Math.abs(v2025)) * 100 : null;
+      ? ((Math.abs(v2026) - Math.abs(v2025)) / Math.abs(v2025)) * 100 : null;
     const ating = (v2026 !== undefined && vBudget !== undefined && vBudget)
       ? (v2026 / vBudget) * 100 : null;
 
@@ -409,7 +409,7 @@ function renderProjecao(){
         <thead><tr><th></th><th>2025</th><th>Projeção 2026</th><th>Budget 2026</th><th class="col-indicador">Cresc.</th><th class="col-indicador">Ating.</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table>
-      <div class="note">Projeção calculada fora do site (Excel) e representada aqui como está — sem recálculo automático.<br>Cresc. = Projeção 2026 vs 2025. Ating. = Projeção 2026 ÷ Budget 2026.</div>
+      <div class="note">Projeção aplicando crescimento do semestre 2025 em 2026 (Run Rate)</div>
     </section>
   `;
 }
@@ -612,7 +612,7 @@ function renderTable(){
   const crescCell = (real2026, real2025, skip) => {
     if(skip) return '<td class="col-indicador">-</td>';
     if(real2026 === undefined || real2025 === undefined || !real2025) return '<td class="col-indicador">-</td>';
-    const pct = ((real2026 - real2025) / Math.abs(real2025)) * 100;
+    const pct = ((Math.abs(real2026) - Math.abs(real2025)) / Math.abs(real2025)) * 100;
     const texto = (pct>=0?'+':'') + pct.toLocaleString('pt-BR', {maximumFractionDigits:1}) + '%';
     const cls = pct >= 0 ? 'cresc-pos' : 'cresc-neg';
     return `<td class="col-indicador ${cls}">${texto}</td>`;
@@ -700,19 +700,15 @@ function renderTable(){
     });
   });
 
-  const semestreLabel = semestre === 'S1' ? '1° Semestre' : semestre === 'S2' ? '2° Semestre' : semestre === 'ANO' ? 'Ano (1°+2° Semestre)' : 'Geral (todos os períodos)';
   const headHtml = isGeral
     ? `<th></th>${periodosGeral.map(p => `<th>${p}</th>`).join('')}`
     : `<th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
-  const noteExtra = isGeral ? '' : ' Ating. = Realizado ÷ Budget. Cresc. = Realizado vs 2025.';
-
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
         <thead><tr>${headHtml}</tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
-      <div class="note">Visão: ${semestreLabel}. Clique numa linha em destaque para abrir/fechar as contas. Valores negativos aparecem entre parênteses.${noteExtra}</div>
     </section>
   `;
 }
