@@ -98,6 +98,11 @@
   tr.row-categoria td:first-child{font-weight:700; color:var(--navy); padding-left:18px;}
   tr.row-categoria{background:#f0f2f5;}
   tr.row-conta td:first-child{padding-left:40px; color:var(--slate);}
+  tr.row-categoria.clickable{cursor:pointer;}
+  tr.child-row{display:none;}
+  tr.child-row.open{display:table-row;}
+  .toggle{display:inline-block; width:14px; text-align:center; margin-right:6px; color:var(--slate); font-weight:700;}
+  .toggle-space{display:inline-block; width:20px;}
 
   td.destaque{background:#fdecea; font-weight:700; color:#a83226;}
   .legenda-destaque{
@@ -302,12 +307,17 @@ function renderTable(){
     return `<td class="${(negCls+destCls).trim()}">${fmt(v)}</td>`;
   };
 
-  const linhaHtml = (label, v, rowClass) => {
+  const linhaHtml = (label, v, rowClass, opts) => {
+    opts = opts || {};
     const diff = (v.budget !== undefined && v.forecast !== undefined) ? (Math.abs(v.forecast) - Math.abs(v.budget)) : undefined;
     const diffPct = (diff !== undefined && v.budget) ? (diff / Math.abs(v.budget)) * 100 : undefined;
     const destaque = diff !== undefined && Math.abs(diff) >= LIMIAR_DESTAQUE;
-    return `<tr class="${rowClass}">
-      <td>${label}</td>
+    const toggleIcon = opts.toggle ? '<span class="toggle">▸</span>' : (opts.indent ? '<span class="toggle-space"></span>' : '');
+    const onclick = opts.onclick ? ` onclick="${opts.onclick}"` : '';
+    const dataGroup = opts.dataGroup ? ` data-group="${opts.dataGroup}"` : '';
+    const cls = [rowClass, opts.toggle ? 'clickable' : ''].filter(Boolean).join(' ');
+    return `<tr class="${cls}"${dataGroup}${onclick}>
+      <td>${toggleIcon}${label}</td>
       ${cell(v.real2025, false)}
       ${cell(v.real2026, false)}
       ${cell(v.budget, false)}
@@ -331,11 +341,15 @@ function renderTable(){
 
   let bodyHtml = linhaHtml('Despesas Gerais e Administrativas', totalGeral, 'row-total');
 
-  categorias.forEach(cat => {
+  categorias.forEach((cat, i) => {
     const v = cat.totalKey ? valoresPara(cat.totalKey) : {};
-    bodyHtml += linhaHtml(cat.nivel2, v, 'row-categoria');
+    const groupId = `cat${i}`;
+    const hasContas = cat.contas.length > 0;
+    bodyHtml += linhaHtml(cat.nivel2, v, 'row-categoria', hasContas
+      ? { toggle:true, onclick:`toggleGroup('${groupId}', this)` }
+      : { indent:true });
     cat.contas.forEach(conta => {
-      bodyHtml += linhaHtml(conta.label, valoresPara(conta.key), 'row-conta');
+      bodyHtml += linhaHtml(conta.label, valoresPara(conta.key), 'row-conta child-row', { dataGroup: groupId });
     });
   });
 
@@ -346,9 +360,17 @@ function renderTable(){
         <tbody>${bodyHtml}</tbody>
       </table>
       <div class="legenda-destaque"><span class="legenda-swatch"></span> Variação (Budget x Forecast) acima de R$ 100 mil</div>
-      <div class="note">Diferença = Forecast − Budget, calculada em valor absoluto. "Ano" soma 1°+2° Semestre quando os dois existem. Tudo já vem expandido — sem clique.</div>
+      <div class="note">Diferença = Forecast − Budget, calculada em valor absoluto. "Ano" soma 1°+2° Semestre quando os dois existem. Clique numa categoria pra abrir as contas de Nível 3.</div>
     </section>
   `;
+}
+
+function toggleGroup(groupId, headerRow){
+  const rows = document.querySelectorAll(`tr[data-group="${groupId}"]`);
+  const icon = headerRow.querySelector('.toggle');
+  const willOpen = !rows[0]?.classList.contains('open');
+  rows.forEach(r => r.classList.toggle('open', willOpen));
+  if(icon) icon.textContent = willOpen ? '▾' : '▸';
 }
 
 loadAll();
