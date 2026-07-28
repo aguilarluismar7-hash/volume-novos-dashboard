@@ -322,6 +322,12 @@ function fmtValor(n, isPercent){
 
 let currentRows = [];
 let currentSemestre = 'S1';
+let usarBudgetComparavel = false;
+
+function toggleBudgetComparavel(){
+  usarBudgetComparavel = !usarBudgetComparavel;
+  renderTable();
+}
 
 function setSemestre(sem, btn){
   currentSemestre = sem;
@@ -415,7 +421,11 @@ function renderTable(){
 
   const rowValues = (key, isPercent) => {
     const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
-    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
+    let vBudget = getValue(values, key, semestre, 'budget', isPercent);
+    if(semestre === 'ANO' && usarBudgetComparavel && !isPercent){
+      const comparavel = (values[key] || {})['Budget Comparável 2026'];
+      if(comparavel !== undefined) vBudget = comparavel;
+    }
     if(isPercent){
       const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
       return { v2025, v2026, vBudget, v2026RunRate: false };
@@ -633,14 +643,24 @@ function renderTable(){
     });
   });
 
+  const budgetLabel = (semestre === 'ANO' && usarBudgetComparavel) ? 'Budget (s/ lojas novas)' : 'Budget';
   const headHtml = isGeral
     ? `<th></th>${periodosGeral.map(p => `<th>${p}</th>`).join('')}`
-    : `<th></th><th>2025</th><th>2026${anyRunRate?'*':''}</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
+    : `<th></th><th>2025</th><th>2026${anyRunRate?'*':''}</th><th>${budgetLabel}</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
   const notaRunRate = anyRunRate
     ? `<div class="note">*Coluna 2026 projetada por Run Rate: aplica o crescimento do 2° Semestre de 2025 sobre o 1° Semestre de 2026 já realizado. No "Ano", soma o 1° Semestre realizado + o 2° Semestre projetado.</div>`
     : '';
+  const toggleComparavel = (semestre === 'ANO')
+    ? `<div style="margin-bottom:14px;">
+        <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--slate); cursor:pointer;">
+          <input type="checkbox" ${usarBudgetComparavel?'checked':''} onchange="toggleBudgetComparavel()">
+          S/ Lojas Novas (usa Budget Comparável, sem o efeito das lojas sem histórico)
+        </label>
+      </div>`
+    : '';
   document.getElementById('content').innerHTML = `
     <section class="block">
+      ${toggleComparavel}
       <table class="dre">
         <thead><tr>${headHtml}</tr></thead>
         <tbody>${bodyHtml}</tbody>
