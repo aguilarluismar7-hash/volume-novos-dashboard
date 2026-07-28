@@ -409,7 +409,7 @@ function renderProjecao(){
         <thead><tr><th></th><th>2025</th><th>Projeção 2026</th><th>Budget 2026</th><th class="col-indicador">Cresc.</th><th class="col-indicador">Ating.</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table>
-      <div class="note">Projeção aplicando crescimento semestral 2025 em 2026. (Run Rate)</div>
+      <div class="note">Projeção aplicando crescimento do semestre 2025 em 2026 (Run Rate)</div>
     </section>
   `;
 }
@@ -547,10 +547,16 @@ function renderTable(){
       let parentKey = null;
       const children = [];
       clean.forEach(o => {
-        if(o.label === 'Total') parentKey = o.key;
+        // Nível2 em branco ou "Total" = a própria linha É o valor do grupo.
+        // Qualquer outro texto = uma conta filha.
+        if(o.label === '' || o.label === 'Total') parentKey = o.key;
         else children.push(o);
       });
-      return { nivel1, kind:'flat', parentKey, children };
+      // Se não veio nenhuma linha de total/em branco, mas existem contas filhas
+      // (ex: Despesas Gerais e Administrativas sem linha própria de total),
+      // soma as filhas pra formar o total do grupo automaticamente.
+      const autoSum = (!parentKey && children.length > 0);
+      return { nivel1, kind:'flat', parentKey, children, autoSum };
     }
 
     // 3 níveis: agrupa por Nível 2 (subcategoria)
@@ -670,7 +676,10 @@ function renderTable(){
       const rowClass = ['parent-row', hasChildren ? '' : 'no-children', colorClass].filter(Boolean).join(' ');
       const onclick = hasChildren ? ` onclick="toggleGroup('${groupId}', this)"` : '';
 
-      bodyHtml += rowHtml(block.nivel1, cellsForKey(block.parentKey, isPercent), rowClass, onclick, toggleIcon, null);
+      const headerCells = block.autoSum
+        ? cellsForSum(block.children.map(c => c.key), isPercent)
+        : cellsForKey(block.parentKey, isPercent);
+      bodyHtml += rowHtml(block.nivel1, headerCells, rowClass, onclick, toggleIcon, null);
 
       block.children.forEach(child => {
         bodyHtml += rowHtml(child.label, cellsForKey(child.key, isPercent), 'child-row', ` data-group="${groupId}"`, '', null);
