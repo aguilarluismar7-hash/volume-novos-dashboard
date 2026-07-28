@@ -193,14 +193,12 @@
     <label style="font-size:0.72rem; font-weight:700; color:var(--slate); text-transform:uppercase; letter-spacing:0.03em; width:70px;">Visão</label>
     <div class="seg-group">
       <button type="button" class="seg-btn" data-sem="GERAL" onclick="setSemestre('GERAL', this)">Geral</button>
-      <button type="button" class="seg-btn" data-sem="PROJECAO" onclick="setSemestre('PROJECAO', this)">Projeção</button>
     </div>
   </div>
 
   <div id="content">
     <div class="loading">Carregando dados da planilha…</div>
   </div>
-  <div id="content-projecao" style="display:none;"></div>
 </div>
 </div>
 
@@ -239,6 +237,38 @@ function getValue(values, key, semestre, type, isPercent){
     return undefined;
   }
   return vals[map[semestre]];
+}
+
+// Run Rate do Realizado 2026 no 2° Semestre: se ainda não existe Realizado 2S 2026 de
+// verdade, projeta aplicando o crescimento sazonal do ano anterior (2S 2025 vs 1S 2025)
+// sobre o 1° Semestre de 2026 já realizado. Assim que o dado real do 2S 2026 existir na
+// planilha, essa projeção para de ser usada automaticamente (o real sempre tem prioridade).
+function getReal2026ComRunRate(values, key, semestre){
+  const vals = values[key] || {};
+  const s1_2026 = vals[PERIOD_MAP.real2026.S1];
+  const s2_2026_real = vals[PERIOD_MAP.real2026.S2];
+  const s1_2025 = vals[PERIOD_MAP.real2025.S1];
+  const s2_2025 = vals[PERIOD_MAP.real2025.S2];
+
+  const projetarS2 = () => {
+    if(s1_2025 === undefined || s2_2025 === undefined || !s1_2025 || s1_2026 === undefined) return undefined;
+    return s1_2026 * (s2_2025 / s1_2025);
+  };
+
+  if(semestre === 'S1'){
+    return { value: s1_2026, runRate: false };
+  }
+  if(semestre === 'S2'){
+    if(s2_2026_real !== undefined) return { value: s2_2026_real, runRate: false };
+    const proj = projetarS2();
+    return { value: proj, runRate: proj !== undefined };
+  }
+  // ANO
+  if(s1_2026 === undefined) return { value: undefined, runRate: false };
+  if(s2_2026_real !== undefined) return { value: s1_2026 + s2_2026_real, runRate: false };
+  const proj = projetarS2();
+  if(proj === undefined) return { value: s1_2026, runRate: false };
+  return { value: s1_2026 + proj, runRate: true };
 }
 
 function jsonUrl(sheetName){
@@ -292,135 +322,16 @@ function fmtValor(n, isPercent){
 
 let currentRows = [];
 let currentSemestre = 'S1';
-let projecaoRows = null; // cache — só busca a TabCenario na primeira vez que abrir
 
 function setSemestre(sem, btn){
   currentSemestre = sem;
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-
-  const dreEl = document.getElementById('content');
-  const projEl = document.getElementById('content-projecao');
-
-  if(sem === 'PROJECAO'){
-    dreEl.style.display = 'none';
-    projEl.style.display = '';
-    loadProjecao();
-  } else {
-    dreEl.style.display = '';
-    projEl.style.display = 'none';
-    renderTable();
-  }
-}
-
-// Ordem fixa das linhas da Projeção (segue a ordem natural do DRE)
-const ORDEM_PROJECAO = [
-  'Faturamento Líquido',
-  'Custos Operacionais Totais',
-  'Resultado Operacional Líquido',
-  'Despesas Gerais e Administrativas',
-  'EBITDA',
-  'Outras Receitas e Despesas',
-  'Resultado da Loja',
-];
-
-async function loadProjecao(){
-  const el = document.getElementById('content-projecao');
-  if(projecaoRows){ renderProjecao(); return; }
-  el.innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
-  try{
-    const { header, rows: raw } = await fetchSheetJSON('TabCenario');
-    const idx = {
-      periodo: findCol(header, 'Periodo'),
-      nivel1: findCol(header, 'Nível 1'),
-      valor: findCol(header, 'Valor'),
-    };
-    if(Object.values(idx).some(i => i === -1)){
-      throw new Error('Não encontrei todas as colunas esperadas (Periodo, Nível 1, Valor) na aba TabCenario. Cabeçalho lido: ' + header.join(' | '));
-    }
-    projecaoRows = raw.map(r => ({
-      periodo: String(r[idx.periodo]||'').trim(),
-      nivel1: String(r[idx.nivel1]||'').trim(),
-      valor: (typeof r[idx.valor] === 'number') ? r[idx.valor] : null,
-    })).filter(r => r.periodo && r.nivel1);
-    renderProjecao();
-    document.getElementById('lastUpdated').textContent =
-      'Atualizado em ' + new Date().toLocaleString('pt-BR');
-  } catch(err){
-    el.innerHTML = `<div class="error">Não consegui carregar a Projeção.<br>${err.message}</div>`;
-  }
-}
-
-function renderProjecao(){
-  const el = document.getElementById('content-projecao');
-  const values = {};
-  projecaoRows.forEach(r => {
-    values[r.nivel1] = values[r.nivel1] || {};
-    values[r.nivel1][r.periodo] = r.valor;
-  });
-
-  // Mesma linguagem visual do DRE, só que aqui por nome (a TabCenario não tem ID)
-  const NOME_ROW_CLASS = {
-    'Faturamento Líquido': 'row-consolidador',
-    'Custos Operacionais Totais': 'row-consolidador',
-    'Resultado Operacional Líquido': 'row-consolidador',
-    'EBITDA': 'row-ebitda',
-    'Resultado da Loja': 'row-resultado-loja',
-  };
-
-  const fmt = n => (n === null || n === undefined) ? '-' :
-    (n < 0 ? `(${Math.round(Math.abs(n)).toLocaleString('pt-BR')})` : Math.round(n).toLocaleString('pt-BR'));
-
-  const linhas = ORDEM_PROJECAO.filter(nome => values[nome]).map(nome => {
-    const v2025 = values[nome]['Projeção 2025'];
-    const v2026 = values[nome]['Projeção 2026'];
-    const vBudget = values[nome]['Budget 2026'];
-
-    const cresc = (v2025 !== undefined && v2026 !== undefined && v2025)
-      ? ((Math.abs(v2026) - Math.abs(v2025)) / Math.abs(v2025)) * 100 : null;
-    const ating = (v2026 !== undefined && vBudget !== undefined && vBudget)
-      ? (v2026 / vBudget) * 100 : null;
-
-    const crescTxt = cresc === null ? '-' : (cresc>=0?'+':'') + cresc.toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%';
-    const crescCls = cresc === null ? '' : (cresc >= 0 ? 'cresc-pos' : 'cresc-neg');
-    const atingWidth = ating === null ? 0 : Math.max(0, Math.min(100, ating));
-    const atingTxt = ating === null ? '-' : ating.toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%';
-    const atingHtml = ating === null ? '-' : `
-      <div class="bar-wrap">
-        <span>${atingTxt}</span>
-        <span class="bar-track"><span class="bar-fill" style="width:${atingWidth}%"></span></span>
-      </div>`;
-
-    const negCls = v => (v !== undefined && v !== null && v < 0) ? ' class="neg"' : '';
-    const rowClass = NOME_ROW_CLASS[nome] || '';
-    return `<tr class="${rowClass}">
-      <td>${nome}</td>
-      <td${negCls(v2025)}>${fmt(v2025)}</td>
-      <td${negCls(v2026)}>${fmt(v2026)}</td>
-      <td${negCls(vBudget)}>${fmt(vBudget)}</td>
-      <td class="col-indicador ${crescCls}">${crescTxt}</td>
-      <td class="col-indicador">${atingHtml}</td>
-    </tr>`;
-  }).join('');
-
-  el.innerHTML = `
-    <section class="block">
-      <table class="dre">
-        <thead><tr><th></th><th>2025</th><th>Projeção 2026</th><th>Budget 2026</th><th class="col-indicador">Cresc.</th><th class="col-indicador">Ating.</th></tr></thead>
-        <tbody>${linhas}</tbody>
-      </table>
-      <div class="note">Projeção aplicando crescimento do semestre 2025 em 2026 (Run Rate)</div>
-    </section>
-  `;
+  renderTable();
 }
 
 async function atualizarTudo(){
-  if(currentSemestre === 'PROJECAO'){
-    projecaoRows = null; // força buscar de novo
-    await loadProjecao();
-  } else {
-    await loadAll();
-  }
+  await loadAll();
 }
 
 async function loadAll(){
@@ -502,11 +413,16 @@ function renderTable(){
     if(r.id && !idByKey[key]) idByKey[key] = r.id;
   });
 
-  const rowValues = (key, isPercent) => ({
-    v2025: getValue(values, key, semestre, 'real2025', isPercent),
-    v2026: getValue(values, key, semestre, 'real2026', isPercent),
-    vBudget: getValue(values, key, semestre, 'budget', isPercent),
-  });
+  const rowValues = (key, isPercent) => {
+    const v2025 = getValue(values, key, semestre, 'real2025', isPercent);
+    const vBudget = getValue(values, key, semestre, 'budget', isPercent);
+    if(isPercent){
+      const v2026 = getValue(values, key, semestre, 'real2026', isPercent);
+      return { v2025, v2026, vBudget, v2026RunRate: false };
+    }
+    const r = getReal2026ComRunRate(values, key, semestre);
+    return { v2025, v2026: r.value, vBudget, v2026RunRate: r.runRate };
+  };
 
   // Soma os valores (v2025/v2026/vBudget) de uma lista de "rowValues" já calculados —
   // usado pra somar sozinho o total de um grupo de 3 níveis (que não tem linha própria de total).
@@ -516,7 +432,7 @@ function renderTable(){
       list.forEach(v => { if(v[field] !== undefined){ total += v[field]; any = true; } });
       return any ? total : undefined;
     };
-    return { v2025: sum('v2025'), v2026: sum('v2026'), vBudget: sum('vBudget') };
+    return { v2025: sum('v2025'), v2026: sum('v2026'), vBudget: sum('vBudget'), v2026RunRate: list.some(v => v.v2026RunRate) };
   };
 
   // Ordem única de Nível 1, na sequência da planilha
@@ -590,6 +506,7 @@ function renderTable(){
   });
 
   const isGeral = semestre === 'GERAL';
+  let anyRunRate = false; // vira true se alguma linha usou o Run Rate no 2026
 
   // Períodos detectados, na ordem lógica — só usado no modo Geral
   const periodsPresent = new Set(rows.map(r => r.periodo));
@@ -599,6 +516,13 @@ function renderTable(){
   const cell = (val, isPercent) => {
     const cls = (val !== null && val !== undefined && val < 0) ? ' class="neg"' : '';
     return `<td${cls}>${fmtValor(val, isPercent)}</td>`;
+  };
+
+  const cell2026 = (val, isPercent, runRate) => {
+    if(runRate) anyRunRate = true;
+    const cls = (val !== null && val !== undefined && val < 0) ? ' class="neg"' : '';
+    const marker = runRate ? ' *' : '';
+    return `<td${cls}>${fmtValor(val, isPercent)}${marker}</td>`;
   };
 
   const atingCell = (real2026, budget, skip) => {
@@ -635,9 +559,9 @@ function renderTable(){
     if(isGeral){
       return periodosGeral.map(p => cell(key ? ((values[key]||{})[p] ?? null) : null, isPercent)).join('');
     }
-    const v = key ? rowValues(key, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined};
+    const v = key ? rowValues(key, isPercent) : {v2025:undefined, v2026:undefined, vBudget:undefined, v2026RunRate:false};
     return cell(v.v2025 !== undefined ? v.v2025 : null, isPercent) +
-      cell(v.v2026 !== undefined ? v.v2026 : null, isPercent) +
+      cell2026(v.v2026 !== undefined ? v.v2026 : null, isPercent, v.v2026RunRate) +
       cell(v.vBudget !== undefined ? v.vBudget : null, isPercent) +
       atingCell(v.v2026, v.vBudget, isPercent) +
       crescCell(v.v2026, v.v2025, isPercent);
@@ -658,7 +582,7 @@ function renderTable(){
     const list = keys.map(k => rowValues(k, isPercent));
     const sum = sumValues(list);
     return cell(sum.v2025 !== undefined ? sum.v2025 : null, isPercent) +
-      cell(sum.v2026 !== undefined ? sum.v2026 : null, isPercent) +
+      cell2026(sum.v2026 !== undefined ? sum.v2026 : null, isPercent, sum.v2026RunRate) +
       cell(sum.vBudget !== undefined ? sum.vBudget : null, isPercent) +
       atingCell(sum.v2026, sum.vBudget, isPercent) +
       crescCell(sum.v2026, sum.v2025, isPercent);
@@ -711,13 +635,17 @@ function renderTable(){
 
   const headHtml = isGeral
     ? `<th></th>${periodosGeral.map(p => `<th>${p}</th>`).join('')}`
-    : `<th></th><th>2025</th><th>2026</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
+    : `<th></th><th>2025</th><th>2026${anyRunRate?'*':''}</th><th>Budget</th><th class="col-indicador">Ating.</th><th class="col-indicador">Cresc.</th>`;
+  const notaRunRate = anyRunRate
+    ? `<div class="note">*Coluna 2026 projetada por Run Rate: aplica o crescimento do 2° Semestre de 2025 sobre o 1° Semestre de 2026 já realizado. No "Ano", soma o 1° Semestre realizado + o 2° Semestre projetado.</div>`
+    : '';
   document.getElementById('content').innerHTML = `
     <section class="block">
       <table class="dre">
         <thead><tr>${headHtml}</tr></thead>
         <tbody>${bodyHtml}</tbody>
       </table>
+      ${notaRunRate}
     </section>
   `;
 }
