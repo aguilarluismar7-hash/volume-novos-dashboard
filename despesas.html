@@ -251,8 +251,8 @@ async function loadAll(){
 function renderTable(){
   const semestre = currentSemestre;
 
-  // Normaliza: se Nível 1 vier em branco, a categoria de verdade está no Nível 2
-  // e a conta/"Total" no Nível 3 — desloca uma casa (mesma regra usada no DRE).
+  // Normaliza: se Nível 1 vier em branco, a conta de verdade está no Nível 2
+  // e o "Total" no Nível 3 — desloca uma casa (mesma regra usada no DRE).
   const rows = currentRows.map(r => {
     if(r.nivel1 === ''){
       return { ...r, nivel1: r.nivel2, nivel2: r.nivel3, nivel3: '' };
@@ -260,7 +260,7 @@ function renderTable(){
     return r;
   });
 
-  const keyOf = r => r.nivel2 + '||' + (r.id ? r.id : r.nivel3);
+  const keyOf = r => r.nivel1 + '||' + r.nivel2 + '||' + (r.id ? r.id : r.nivel3);
 
   const values = {};
   rows.forEach(r => {
@@ -269,29 +269,6 @@ function renderTable(){
     if(r.valor !== null || values[key][r.periodo] === undefined){
       values[key][r.periodo] = r.valor;
     }
-  });
-
-  const catOrder = [];
-  const catSeen = new Set();
-  rows.forEach(r => {
-    if(!catSeen.has(r.nivel2)){ catSeen.add(r.nivel2); catOrder.push(r.nivel2); }
-  });
-
-  const categorias = catOrder.map(nivel2 => {
-    const catRows = rows.filter(r => r.nivel2 === nivel2);
-    const order = [];
-    const seen = new Set();
-    catRows.forEach(r => {
-      const key = keyOf(r);
-      if(!seen.has(key)){ seen.add(key); order.push({label:r.nivel3, key}); }
-    });
-    let totalKey = null;
-    const contas = [];
-    order.forEach(o => {
-      if(o.label === 'Total' || o.label === '') totalKey = o.key;
-      else contas.push(o);
-    });
-    return { nivel2, totalKey, contas };
   });
 
   const valoresPara = (key) => ({
@@ -327,29 +304,69 @@ function renderTable(){
     </tr>`;
   };
 
-  // Total geral (Despesas Gerais e Administrativas) = soma das categorias
-  const catKeys = categorias.filter(c => c.totalKey).map(c => c.totalKey);
-  const sumFor = (type) => {
-    let total = 0, any = false;
-    catKeys.forEach(k => {
-      const v = getValue(values, k, semestre, type);
-      if(v !== undefined){ total += v; any = true; }
-    });
-    return any ? total : undefined;
+  const sumValues = (keys) => {
+    const sum = (type) => {
+      let total = 0, any = false;
+      keys.forEach(k => { const v = getValue(values, k, semestre, type); if(v !== undefined){ total += v; any = true; } });
+      return any ? total : undefined;
+    };
+    return { real2025: sum('real2025'), real2026: sum('real2026'), budget: sum('budget'), forecast: sum('forecast') };
   };
-  const totalGeral = { real2025: sumFor('real2025'), real2026: sumFor('real2026'), budget: sumFor('budget'), forecast: sumFor('forecast') };
 
-  let bodyHtml = linhaHtml('Despesas Gerais e Administrativas', totalGeral, 'row-total');
+  // Ordem única de Nível 1
+  const nivel1Order = [];
+  const nivel1Seen = new Set();
+  rows.forEach(r => { if(!nivel1Seen.has(r.nivel1)){ nivel1Seen.add(r.nivel1); nivel1Order.push(r.nivel1); } });
 
-  categorias.forEach((cat, i) => {
-    const v = cat.totalKey ? valoresPara(cat.totalKey) : {};
-    const groupId = `cat${i}`;
-    const hasContas = cat.contas.length > 0;
-    bodyHtml += linhaHtml(cat.nivel2, v, 'row-categoria', hasContas
-      ? { toggle:true, onclick:`toggleGroup('${groupId}', this)` }
-      : { indent:true });
-    cat.contas.forEach(conta => {
-      bodyHtml += linhaHtml(conta.label, valoresPara(conta.key), 'row-conta child-row', { dataGroup: groupId });
+  const blocks = nivel1Order.map(nivel1 => {
+    const groupRows = rows.filter(r => r.nivel1 === nivel1);
+    const hasNivel3 = groupRows.some(r => r.nivel3 !== '');
+
+    if(!hasNivel3){
+      // Linha "solta" (Faturamento Líquido, Custos, EBITDA, etc.) — sem drill-down
+      const order = [];
+      const seen = new Set();
+      groupRows.forEach(r => { const key = keyOf(r); if(!seen.has(key)){ seen.add(key); order.push(key); } });
+      const totalKey = order[0]; // linha única, sem filhos
+      return { nivel1, kind:'flat', totalKey };
+    }
+
+    // 3 níveis: Despesas Gerais e Administrativas / Outras Receitas e Despesas
+    const nivel2Order = [];
+    const nivel2Seen = new Set();
+    groupRows.forEach(r => { if(r.nivel2 !== '' && !nivel2Seen.has(r.nivel2)){ nivel2Seen.add(r.nivel2); nivel2Order.push(r.nivel2); } });
+    const categorias = nivel2Order.map(nivel2 => {
+      const catRows = groupRows.filter(r => r.nivel2 === nivel2);
+      const order = [];
+      const seen = new Set();
+      catRows.forEach(r => { const key = keyOf(r); if(!seen.has(key)){ seen.add(key); order.push({label:r.nivel3, key}); } });
+      let totalKey = null;
+      const contas = [];
+      order.forEach(o => { if(o.label === 'Total' || o.label === '') totalKey = o.key; else contas.push(o); });
+      return { nivel2, totalKey, contas };
+    });
+    return { nivel1, kind:'grouped', categorias };
+  });
+
+  let bodyHtml = '';
+  blocks.forEach((block, i) => {
+    if(block.kind === 'flat'){
+      bodyHtml += linhaHtml(block.nivel1, valoresPara(block.totalKey), 'row-total');
+      return;
+    }
+    const catKeys = block.categorias.filter(c => c.totalKey).map(c => c.totalKey);
+    bodyHtml += linhaHtml(block.nivel1, sumValues(catKeys), 'row-total');
+
+    block.categorias.forEach((cat, j) => {
+      const v = cat.totalKey ? valoresPara(cat.totalKey) : {};
+      const groupId = `g${i}-${j}`;
+      const hasContas = cat.contas.length > 0;
+      bodyHtml += linhaHtml(cat.nivel2, v, 'row-categoria', hasContas
+        ? { toggle:true, onclick:`toggleGroup('${groupId}', this)` }
+        : { indent:true });
+      cat.contas.forEach(conta => {
+        bodyHtml += linhaHtml(conta.label, valoresPara(conta.key), 'row-conta child-row', { dataGroup: groupId });
+      });
     });
   });
 
