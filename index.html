@@ -45,6 +45,19 @@
   }
   #refreshBtn:hover{background:var(--navy-2);}
   #refreshBtn:disabled{opacity:0.6;cursor:default;}
+  .btn{
+    background:var(--navy);
+    color:#fff;
+    border:none;
+    padding:7px 14px;
+    border-radius:7px;
+    font-size:0.8rem;
+    cursor:pointer;
+    font-weight:600;
+  }
+  .btn:hover{background:var(--navy-2);}
+  .btn.secondary{background:#fff; color:var(--navy); border:1px solid var(--border);}
+  .btn.secondary.active{background:var(--navy); color:#fff;}
 
   .filters{
     display:grid;
@@ -180,7 +193,10 @@
     </div>
     <div class="status">
       <span id="lastUpdated">Carregando…</span>
-      <button id="refreshBtn" onclick="loadAll()">Atualizar dados</button>
+      <div style="display:flex; gap:8px;">
+        <button id="detalheBtn" class="btn secondary" onclick="toggleDetalhe()">Detalhar Budget x Forecast</button>
+        <button id="refreshBtn" onclick="loadAll()">Atualizar dados</button>
+      </div>
     </div>
   </header>
 
@@ -214,6 +230,7 @@
   <div id="content">
     <div class="loading">Carregando dados da planilha…</div>
   </div>
+  <div id="detalhe" style="display:none;"></div>
 </div>
 </div>
 
@@ -374,10 +391,10 @@ function buildFilters(){
     [...estados].sort().map(e => `<option value="${e}">${e}</option>`).join('');
   estadoSel.value = [...estados].includes(prevEstado) ? prevEstado : 'Todos';
 
-  estadoSel.onchange = () => { buildLojaOptions(); render(); };
-  document.getElementById('fCanal').onchange = render;
-  document.getElementById('fSemestre').onchange = render;
-  document.getElementById('fLoja').onchange = render;
+  estadoSel.onchange = () => { buildLojaOptions(); renderAll(); };
+  document.getElementById('fCanal').onchange = renderAll;
+  document.getElementById('fSemestre').onchange = renderAll;
+  document.getElementById('fLoja').onchange = renderAll;
 
   buildLojaOptions(prevLoja);
 }
@@ -657,6 +674,84 @@ function renderReducaoChart(){
   } else {
     resumoEl.textContent = 'Aguardando dados de Budget e/ou Forecast Diretor na TabVolume.';
   }
+}
+
+let detalheAberto = false;
+
+function renderAll(){
+  render();
+  if(detalheAberto) renderDetalhe();
+}
+
+function toggleDetalhe(){
+  detalheAberto = !detalheAberto;
+  const el = document.getElementById('detalhe');
+  const btn = document.getElementById('detalheBtn');
+  el.style.display = detalheAberto ? '' : 'none';
+  btn.classList.toggle('active', detalheAberto);
+  btn.textContent = detalheAberto ? 'Fechar detalhamento' : 'Detalhar Budget x Forecast';
+  if(detalheAberto) renderDetalhe();
+}
+
+function renderDetalhe(){
+  const f = getFilters();
+  const s2 = MESES.filter(m => m.semestre === 'S2');
+
+  // Ignora o filtro de Loja de propósito — a ideia é ver TODAS as lojas de uma vez.
+  // Respeita Estado/Canal, igual aos gráficos.
+  const nsSet = new Set();
+  volumeData.forEach(r => {
+    if((r.cenario === 'Budget 2026' || r.cenario === 'Forecast Diretor 2026') && matchesBaseFilters(r, f, {ignoreLoja:true})){
+      nsSet.add(r.n);
+    }
+  });
+  const ns = [...nsSet].map(n => ({n, label: volumeLabel(n) || n}))
+    .sort((a,b) => a.label.localeCompare(b.label));
+
+  const valorFor = (n, cenario, mes) => {
+    let total = 0, has = false;
+    volumeData.forEach(r => {
+      if(r.n === n && r.cenario === cenario && r.mes === mes && matchesBaseFilters(r, f, {ignoreLoja:true}) && r.valor !== null){
+        total += r.valor; has = true;
+      }
+    });
+    return has ? total : null;
+  };
+
+  const buildTable = (cenario, corTotal) => {
+    const headRow = `<tr><th>Loja</th>${s2.map(m=>`<th>${m.label}</th>`).join('')}<th class="total">Total</th></tr>`;
+    let colTotais = s2.map(()=>0);
+    let grandTotal = 0;
+    const bodyRows = ns.map(({n, label}) => {
+      let rowTotal = 0, any = false;
+      const cells = s2.map((m, i) => {
+        const v = valorFor(n, cenario, m.abbr);
+        if(v !== null){ rowTotal += v; any = true; colTotais[i] += v; }
+        return `<td>${v===null?'-':fmt(v)}</td>`;
+      }).join('');
+      grandTotal += rowTotal;
+      return `<tr><td>${label}</td>${cells}<td class="total">${any?fmt(rowTotal):'-'}</td></tr>`;
+    }).join('');
+    const totalRow = `<tr style="background:#f0f2f5;"><td><strong>Total</strong></td>${colTotais.map(v=>`<td><strong>${fmt(v)}</strong></td>`).join('')}<td class="total"><strong style="color:${corTotal}">${fmt(grandTotal)}</strong></td></tr>`;
+    return `<table class="monthly" style="font-size:0.78rem;"><thead>${headRow}</thead><tbody>${bodyRows}${totalRow}</tbody></table>`;
+  };
+
+  document.getElementById('detalhe').innerHTML = `
+    <section class="block">
+      <h2>Detalhamento por loja — 2° Semestre 2026</h2>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div style="font-weight:700; color:var(--navy); margin-bottom:8px;">Budget 2026</div>
+          <div style="overflow-x:auto;">${buildTable('Budget 2026', 'var(--navy)')}</div>
+        </div>
+        <div>
+          <div style="font-weight:700; color:var(--navy); margin-bottom:8px;">Forecast Diretor</div>
+          <div style="overflow-x:auto;">${buildTable('Forecast Diretor 2026', 'var(--navy)')}</div>
+        </div>
+      </div>
+      <div class="note">Ignora o filtro de Loja (sempre mostra todas), mas respeita Estado/Canal. Compara lado a lado pra facilitar achar divergência mês a mês.</div>
+    </section>
+  `;
 }
 
 loadAll();
