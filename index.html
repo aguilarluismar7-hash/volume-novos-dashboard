@@ -291,7 +291,7 @@
 <div class="main">
 <div class="wrap">
   <header>
-    <div style="display:flex; align-items:center; gap:14px;">
+    <div>
       <h1>Análise de Fornecedores</h1>
       <div class="subtitle">Recorte atual: Top 15 fornecedores por valor total · Operação "Entradas Nfs Diversas" · Período 2025–2026</div>
     </div>
@@ -901,21 +901,26 @@ function renderChartCategoria(categorias){
   });
 }
 
-function onBuscaInput(){
-  const termo = document.getElementById('fBusca').value.trim().toLowerCase();
+function renderSugestoes(termo){
   const lista = document.getElementById('fBuscaLista');
-  if(!termo){
-    lista.classList.remove('show');
-    lista.innerHTML = '';
-  } else {
-    const matches = listaNomesFornecedores.filter(n => n.toLowerCase().includes(termo)).slice(0,8);
-    lista.innerHTML = matches.map(n => `<div class="autocomplete-item" onclick="selecionarFornecedor('${n.replace(/'/g,"\\'")}')">${n}</div>`).join('');
-    lista.classList.toggle('show', matches.length > 0);
-  }
+  const termoLower = (termo || '').trim().toLowerCase();
+  const matches = termoLower
+    ? listaNomesFornecedores.filter(n => n.toLowerCase().includes(termoLower))
+    : listaNomesFornecedores; // campo vazio: mostra todos (são só 15, cabe tranquilo)
+  lista.innerHTML = matches.map(n => `<div class="autocomplete-item" onclick="selecionarFornecedor('${n.replace(/'/g,"\\'")}')">${n}</div>`).join('');
+  lista.classList.toggle('show', matches.length > 0);
+}
+
+function onBuscaInput(){
+  renderSugestoes(document.getElementById('fBusca').value);
   categoriasAbertas.clear();
   fornecedorAberto = null;
   rankingAberto = null;
   render();
+}
+
+function onBuscaFocus(){
+  renderSugestoes(document.getElementById('fBusca').value);
 }
 
 function selecionarFornecedor(nome){
@@ -928,6 +933,7 @@ function selecionarFornecedor(nome){
 }
 
 document.getElementById('fBusca').addEventListener('input', onBuscaInput);
+document.getElementById('fBusca').addEventListener('focus', onBuscaFocus);
 document.addEventListener('click', (e) => {
   if(!e.target.closest('.autocomplete-wrap')){
     const lista = document.getElementById('fBuscaLista');
