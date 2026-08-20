@@ -216,13 +216,15 @@ async function loadAll(){
       const valor = v25 !== null ? v25 : v26;
       const ano = dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null));
       const mes = dataObj ? (dataObj.getMonth()+1) : null;
-      const simplesRaw = (r[idxF.optanteSimples]||'').toString().trim();
+      const simplesRawTexto = (r[idxF.optanteSimples]||'').toString();
+      const simplesRaw = simplesRawTexto.trim();
       const simples = simplesRaw === '1' ? true : (simplesRaw === '0' ? false : null);
       return {
         fornecedor, label,
         categoria: (r[idxF.categoria]||'').trim(),
         nf: (r[idxF.nf]||'').trim(),
         valor, ano, mes, simples,
+        _simplesRawTexto: simplesRawTexto,
       };
     })
     .filter(r => r.fornecedor && r.fornecedor !== 'Total')
@@ -234,13 +236,14 @@ async function loadAll(){
     const map = {};
     nfRows.forEach(r => {
       if(!map[r.fornecedor]){
-        map[r.fornecedor] = { fornecedor:r.fornecedor, label:r.label, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), mesesComCompra:new Set(), simples:r.simples };
+        map[r.fornecedor] = { fornecedor:r.fornecedor, label:r.label, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), mesesComCompra:new Set(), simples:r.simples, _rawValores:new Set() };
       }
       const m = map[r.fornecedor];
       m.valorTotal += r.valor;
       m.qtdNotas.add(r.nf);
       if(r.ano && r.mes) m.mesesComCompra.add(r.ano+'-'+r.mes);
       if(m.simples === null && r.simples !== null) m.simples = r.simples;
+      m._rawValores.add(JSON.stringify(r._simplesRawTexto));
     });
 
     let lista = Object.values(map).map(m => {
@@ -260,6 +263,7 @@ async function loadAll(){
         recorrencia,
         simples: m.simples,
         pendente: m.simples === null,
+        _rawValores: [...m._rawValores],
       };
     }).sort((a,b) => b.valorTotal - a.valorTotal);
 
@@ -358,6 +362,20 @@ function render(){
   </section>`;
 
   html += `<div class="note">Mais análises serão adicionadas aqui conforme o projeto evoluir.</div>`;
+
+  // ---- DIAGNÓSTICO TEMPORÁRIO ----
+  let debugRows = fornecedores.map(f => `<tr>
+      <td>${f.label} (${f.fornecedor})</td>
+      <td>${f._rawValores.map(v => v).join(' | ')}</td>
+      <td>${f.simples === null ? 'pendente' : (f.simples ? 'SIM' : 'não')}</td>
+    </tr>`).join('');
+  html += `<section class="block" style="border:2px dashed #c8442d;">
+    <h2 style="color:#c8442d;">🔧 Diagnóstico temporário — valores brutos de "Optante Simples"</h2>
+    <table class="monthly">
+      <thead><tr><th>Fornecedor</th><th>Valor(es) bruto(s) encontrado(s)</th><th>Simples final</th></tr></thead>
+      <tbody>${debugRows}</tbody>
+    </table>
+  </section>`;
 
   document.getElementById('content').innerHTML = html;
   renderChartRecorrencia(contagemRec);

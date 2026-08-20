@@ -465,6 +465,7 @@ async function loadAll(){
 
     const idx = {
       fornecedor: findCol(header, ['Fornecedor'], 0),
+      label: findCol(header, ['Fornecedor Ajustado'], 1),
       cnpjBruto: findCol(header, ['FORNECEDOR_CNPJ'], 2),
       cnpjAjustado: findCol(header, ['CNPJ Ajustado'], 3),
       optanteSimples: findCol(header, ['Optante Simples'], 4),
@@ -483,6 +484,7 @@ async function loadAll(){
     rawRows = rows.slice(1)
       .map(r => {
         const fornecedor = (r[idx.fornecedor]||'').trim();
+        const label = idx.label !== -1 ? (r[idx.label]||'').trim() : '';
         const conta = idx.conta !== -1 ? (r[idx.conta]||'').trim() : '';
         const nfRaw = idx.nf !== -1 ? (r[idx.nf]||'').trim() : '';
         const v25 = idx.v2025 !== -1 ? toNumber(r[idx.v2025]) : null;
@@ -496,6 +498,7 @@ async function loadAll(){
         const simples = simplesRaw === '1' ? true : (simplesRaw === '0' ? false : null);
         return {
           fornecedor,
+          label,
           categoria: idx.categoria !== -1 ? (r[idx.categoria]||'').trim() : '',
           conta,
           nf: nfRaw,
@@ -547,7 +550,7 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
-  listaNomesFornecedores = [...new Set(rawRows.map(r => r.fornecedor).filter(Boolean))].sort();
+  listaNomesFornecedores = [...new Set(rawRows.map(r => r.label || r.fornecedor).filter(Boolean))].sort();
 
   catSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   contaSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
@@ -586,7 +589,7 @@ function resumoPorFornecedor(rows){
   const map = {};
   rows.forEach(r => {
     if(!map[r.fornecedor]){
-      map[r.fornecedor] = { fornecedor:r.fornecedor, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), datas:[], mesesComCompra:new Set(), simples:r.simples };
+      map[r.fornecedor] = { fornecedor:r.fornecedor, label:r.label, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), datas:[], mesesComCompra:new Set(), simples:r.simples };
     }
     const m = map[r.fornecedor];
     m.valorTotal += r.valor;
@@ -601,6 +604,7 @@ function resumoPorFornecedor(rows){
     const nMeses = x.mesesComCompra.size;
     return {
       fornecedor: x.fornecedor,
+      label: x.label || x.fornecedor,
       categoria: x.categoria,
       valorTotal: x.valorTotal,
       qtdNotas: qtd,
@@ -648,7 +652,7 @@ function render(){
   const f = getFilters();
   let rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
   if(f.busca){
-    rowsFiltradas = rowsFiltradas.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
+    rowsFiltradas = rowsFiltradas.filter(r => (r.label||r.fornecedor).toLowerCase().includes(f.busca));
   }
 
   const resumoGeralFornecedor = resumoPorFornecedor(rowsFiltradas);
@@ -656,7 +660,7 @@ function render(){
 
   // KPIs — agora considerando também o filtro de busca (fornecedor), não só Ano/Categoria/Conta
   const resumoParaKPI = f.busca
-    ? resumoGeralFornecedor.filter(r => r.fornecedor.toLowerCase().includes(f.busca))
+    ? resumoGeralFornecedor.filter(r => (r.label||r.fornecedor).toLowerCase().includes(f.busca))
     : resumoGeralFornecedor;
   const fornecedoresQueBatem = new Set(resumoParaKPI.map(r => r.fornecedor));
   const rowsParaKPI = f.busca ? rowsFiltradas.filter(r => fornecedoresQueBatem.has(r.fornecedor)) : rowsFiltradas;
@@ -740,7 +744,7 @@ function render(){
   resumoRanking.forEach(r => {
     const aberto = rankingAberto === r.fornecedor;
     rankRows += `<tr class="click-row${aberto?' aberto':''}" onclick="toggleRanking('${r.fornecedor.replace(/'/g,"\\'")}')">
-      <td>${r.fornecedor}${badgeAlerta(r.ultimaCompra)}</td>
+      <td>${r.label}${badgeAlerta(r.ultimaCompra)}</td>
       <td><span class="badge">${r.categoria || '—'}</span></td>
       <td>${r.qtdNotas}</td>
       <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
@@ -802,14 +806,14 @@ function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
   let resumo = resumoPorFornecedor(rowsDaCategoria);
 
   if(f.busca){
-    resumo = resumo.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
+    resumo = resumo.filter(r => (r.label||r.fornecedor).toLowerCase().includes(f.busca));
   }
 
   let rows = '';
   resumo.forEach(r => {
     const abertoF = fornecedorAberto === (categoria + '::' + r.fornecedor);
     rows += `<tr class="click-row${abertoF?' aberto':''}" onclick="event.stopPropagation(); toggleFornecedor('${categoria.replace(/'/g,"\\'")}','${r.fornecedor.replace(/'/g,"\\'")}')">
-      <td>${r.fornecedor}${badgeAlerta(r.ultimaCompra)}</td>
+      <td>${r.label}${badgeAlerta(r.ultimaCompra)}</td>
       <td>${r.qtdNotas}</td>
       <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
       <td>${fmtDate(r.ultimaCompra)}</td>
@@ -889,7 +893,7 @@ function renderChartRanking(resumo){
   charts.ranking = new Chart(ctx, {
     type:'bar',
     data:{
-      labels: top10.map(r=>r.fornecedor.length>26 ? r.fornecedor.slice(0,26)+'…' : r.fornecedor),
+      labels: top10.map(r=>r.label.length>26 ? r.label.slice(0,26)+'…' : r.label),
       datasets:[{ data: top10.map(r=>r.valorTotal), backgroundColor:'#0f2440', borderRadius:4 }]
     },
     options:{
