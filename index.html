@@ -51,6 +51,11 @@
     grid-template-columns:repeat(4,1fr);
     gap:14px;
     margin-bottom:22px;
+    position:sticky;
+    top:0;
+    z-index:5;
+    background:var(--bg,#f4f6f9);
+    padding:12px 0;
   }
   .filter label{
     display:block;
@@ -147,7 +152,27 @@
     gap:18px;
     align-items:start;
   }
+  .ranking-layout{ display:block; }
+  .ranking-layout .chart-box-cat{ margin-top:18px; height:340px; }
   .chart-box-cat{position:relative; height:360px;}
+  .cat-dot{
+    display:inline-block;
+    width:9px; height:9px;
+    border-radius:50%;
+    margin-right:8px;
+    vertical-align:middle;
+  }
+  .btn-mini{
+    background:#fff;
+    border:1px solid var(--border);
+    color:var(--navy);
+    padding:5px 12px;
+    border-radius:7px;
+    font-size:0.76rem;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .btn-mini:hover{background:#f3f6fa;}
 
   table.monthly{
     width:100%;
@@ -200,6 +225,11 @@
     font-weight:600;
     background:#eef2f7;
     color:var(--navy);
+  }
+  .badge.alerta{
+    background:#fbeae7;
+    color:#c8442d;
+    margin-left:6px;
   }
   .sub-block{
     margin:0 0 10px 0;
@@ -277,9 +307,12 @@
 <script>
 let rawRows = [];      // linhas de detalhe de NF já limpas: {fornecedor, categoria, conta, nf, data, ano, mes, valor}
 let charts = {categoria:null, ranking:null};
-let categoriaAberta = null;
+let categoriasAbertas = new Set();
 let fornecedorAberto = null;
 let rankingAberto = null;
+let dataReferencia = null; // maior data encontrada na base — usada para calcular "dias sem comprar"
+
+const CORES_CATEGORIA = ['#0f2440','#16345c','#1f8a5f','#c8442d','#d9a441','#6b7789','#8ca3c2','#a9425a','#3d7a6e','#7a5c9e'];
 
 function csvUrl(sheetName){
   return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
@@ -440,6 +473,9 @@ async function loadAll(){
       .filter(r => r.nf && r.nf !== 'Total')
       .filter(r => r.valor !== null);
 
+    const todasAsDatas = rawRows.map(r => r.data).filter(Boolean);
+    dataReferencia = todasAsDatas.length ? new Date(Math.max(...todasAsDatas.map(d=>d.getTime()))) : null;
+
     buildFilters();
     render();
 
@@ -472,9 +508,9 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
-  catSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
-  contaSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
-  document.getElementById('fAno').onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
+  catSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
+  contaSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
+  document.getElementById('fAno').onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   document.getElementById('fBusca').oninput = () => { render(); };
 }
 
@@ -550,6 +586,17 @@ function resumoPorCategoria(rows){
   })).sort((a,b) => b.valorTotal - a.valorTotal);
 }
 
+function diasSemComprar(ultimaCompra){
+  if(!ultimaCompra || !dataReferencia) return null;
+  return Math.round((dataReferencia.getTime() - ultimaCompra.getTime()) / 86400000);
+}
+
+function badgeAlerta(ultimaCompra){
+  const dias = diasSemComprar(ultimaCompra);
+  if(dias === null || dias < 60) return '';
+  return `<span class="badge alerta">⚠ ${dias}d sem comprar</span>`;
+}
+
 function render(){
   const f = getFilters();
   const rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
@@ -557,7 +604,6 @@ function render(){
   const resumoGeralFornecedor = resumoPorFornecedor(rowsFiltradas);
   let categorias = resumoPorCategoria(rowsFiltradas);
 
-  // Se há busca ativa, só mostra categorias que tenham ao menos um fornecedor correspondente
   if(f.busca){
     const catsComMatch = new Set(
       resumoGeralFornecedor.filter(r => r.fornecedor.toLowerCase().includes(f.busca)).map(r => r.categoria || 'Sem categoria')
@@ -565,7 +611,6 @@ function render(){
     categorias = categorias.filter(c => catsComMatch.has(c.categoria));
   }
 
-  // KPIs gerais (sobre todo o escopo filtrado, não só a categoria aberta)
   const valorTotalGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.valorTotal,0);
   const qtdFornecedoresGeral = resumoGeralFornecedor.length;
   const qtdNotasGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.qtdNotas,0);
@@ -608,11 +653,13 @@ function render(){
   </div>`;
 
   // ---- Nível 1: Categorias (tabela + gráfico lado a lado) ----
+  const todasAbertas = categorias.length>0 && categorias.every(c => categoriasAbertas.has(c.categoria));
   let catRows = '';
-  categorias.forEach(c => {
-    const aberta = categoriaAberta === c.categoria;
+  categorias.forEach((c, i) => {
+    const aberta = categoriasAbertas.has(c.categoria);
+    const cor = CORES_CATEGORIA[i % CORES_CATEGORIA.length];
     catRows += `<tr class="click-row${aberta?' aberto':''}" onclick="toggleCategoria('${c.categoria.replace(/'/g,"\\'")}')">
-      <td><span class="chevron${aberta?' aberto':''}">▶</span>${c.categoria}</td>
+      <td><span class="chevron${aberta?' aberto':''}">▶</span><span class="cat-dot" style="background:${cor}"></span>${c.categoria}</td>
       <td>${c.qtdFornecedores}</td>
       <td>${c.qtdNotas}</td>
       <td class="total">R$ ${fmt(c.valorTotal)}</td>
@@ -623,7 +670,10 @@ function render(){
   });
 
   html += `<section class="block">
-    <h2>Categorias <span class="note" style="display:inline;">(clique para ver os fornecedores)</span></h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h2 style="margin:0;">Categorias <span class="note" style="display:inline;">(clique para ver os fornecedores)</span></h2>
+      <button class="btn-mini" onclick="toggleExpandirTudo(${JSON.stringify(categorias.map(c=>c.categoria))})">${todasAbertas ? 'Recolher todas' : 'Expandir todas'}</button>
+    </div>
     <div class="categoria-layout">
       <div style="overflow-x:auto;">
         <table class="monthly">
@@ -645,7 +695,7 @@ function render(){
   resumoRanking.forEach(r => {
     const aberto = rankingAberto === r.fornecedor;
     rankRows += `<tr class="click-row${aberto?' aberto':''}" onclick="toggleRanking('${r.fornecedor.replace(/'/g,"\\'")}')">
-      <td>${r.fornecedor}</td>
+      <td>${r.fornecedor}${badgeAlerta(r.ultimaCompra)}</td>
       <td><span class="badge">${r.categoria || '—'}</span></td>
       <td>${r.qtdNotas}</td>
       <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
@@ -681,7 +731,7 @@ function render(){
 
   html += `<section class="block">
     <h2>Ranking de Fornecedores <span class="note" style="display:inline;">(clique numa linha para ver as notas)</span></h2>
-    <div class="categoria-layout">
+    <div class="ranking-layout">
       <div style="overflow-x:auto;">
         <table class="monthly">
           <thead><tr><th>Fornecedor</th><th>Categoria</th><th>Notas</th><th>Média Mensal</th><th>Última Compra</th><th class="total">Valor Total</th></tr></thead>
@@ -709,7 +759,7 @@ function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
   resumo.forEach(r => {
     const abertoF = fornecedorAberto === (categoria + '::' + r.fornecedor);
     rows += `<tr class="click-row${abertoF?' aberto':''}" onclick="event.stopPropagation(); toggleFornecedor('${categoria.replace(/'/g,"\\'")}','${r.fornecedor.replace(/'/g,"\\'")}')">
-      <td>${r.fornecedor}</td>
+      <td>${r.fornecedor}${badgeAlerta(r.ultimaCompra)}</td>
       <td>${r.qtdNotas}</td>
       <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
       <td>${fmtDate(r.ultimaCompra)}</td>
@@ -757,7 +807,16 @@ function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
 }
 
 function toggleCategoria(categoria){
-  categoriaAberta = (categoriaAberta === categoria) ? null : categoria;
+  if(categoriasAbertas.has(categoria)) categoriasAbertas.delete(categoria);
+  else categoriasAbertas.add(categoria);
+  fornecedorAberto = null;
+  render();
+}
+
+function toggleExpandirTudo(nomesCategorias){
+  const todasAbertas = nomesCategorias.length>0 && nomesCategorias.every(c => categoriasAbertas.has(c));
+  if(todasAbertas){ categoriasAbertas.clear(); }
+  else { nomesCategorias.forEach(c => categoriasAbertas.add(c)); }
   fornecedorAberto = null;
   render();
 }
@@ -799,7 +858,7 @@ function renderChartCategoria(categorias){
     type:'doughnut',
     data:{
       labels: categorias.map(c=>c.categoria),
-      datasets:[{ data: categorias.map(c=>c.valorTotal), backgroundColor:['#0f2440','#16345c','#1f8a5f','#c8442d','#d9a441','#6b7789','#8ca3c2','#a9425a','#3d7a6e'] }]
+      datasets:[{ data: categorias.map(c=>c.valorTotal), backgroundColor: categorias.map((c,i)=>CORES_CATEGORIA[i % CORES_CATEGORIA.length]) }]
     },
     options:{
       responsive:true, maintainAspectRatio:false,
