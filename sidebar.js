@@ -4,7 +4,7 @@
 (function(){
   const NAV_ITEMS = [
     { href: '/index.html', label: 'Fornecedores' },
-    { href: '/analises.html', label: 'Análises' },
+    { href: '/analise.html', label: 'Análises' },
     { href: '/despesas.html', label: 'Despesas' },
   ];
 
