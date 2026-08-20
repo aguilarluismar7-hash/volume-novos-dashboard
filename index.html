@@ -141,6 +141,14 @@
     color:var(--navy);
     margin:0 0 14px;
   }
+  .categoria-layout{
+    display:grid;
+    grid-template-columns:1.35fr 1fr;
+    gap:18px;
+    align-items:start;
+  }
+  .chart-box-cat{position:relative; height:360px;}
+
   table.monthly{
     width:100%;
     border-collapse:collapse;
@@ -154,7 +162,7 @@
   }
   table.monthly th:first-child, table.monthly td:first-child{
     text-align:left;
-    min-width:200px;
+    min-width:180px;
     color:var(--slate);
     font-weight:600;
   }
@@ -172,10 +180,18 @@
     border-left:2px solid var(--border);
   }
   table.monthly tbody tr:last-child td{border-bottom:none;}
-  table.monthly tbody tr.fornecedor-row{cursor:pointer;}
-  table.monthly tbody tr.fornecedor-row:hover{background:#f7f9fb;}
-  table.monthly tbody tr.fornecedor-row.aberto{background:#eef2f7;}
+  table.monthly tbody tr.click-row{cursor:pointer;}
+  table.monthly tbody tr.click-row:hover{background:#f7f9fb;}
+  table.monthly tbody tr.click-row.aberto{background:#eef2f7;}
   td.dash{color:var(--slate-light);}
+  .chevron{
+    display:inline-block;
+    margin-right:8px;
+    transition:transform 0.15s ease;
+    color:var(--slate);
+    font-size:0.7rem;
+  }
+  .chevron.aberto{transform:rotate(90deg);}
   .badge{
     display:inline-block;
     padding:2px 8px;
@@ -185,28 +201,20 @@
     background:#eef2f7;
     color:var(--navy);
   }
-  .badge.alerta{background:#fbeae7;color:var(--red);}
-  .drill-wrap{
+  .sub-block{
     margin:0 0 10px 0;
     padding:14px 16px;
     background:#fafbfc;
     border:1px solid var(--border);
     border-radius:10px;
   }
-  .drill-wrap table.monthly{font-size:0.78rem;}
-  .drill-close{
+  .sub-block table.monthly{font-size:0.78rem;}
+  .sub-close{
     font-size:0.75rem;
     color:var(--muted);
     cursor:pointer;
     text-decoration:underline;
   }
-
-  .charts{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:16px;
-  }
-  .chart-box{position:relative; height:320px;}
 
   .note{font-size:0.78rem;color:var(--muted);margin-top:10px;line-height:1.5;}
   .loading, .error{
@@ -218,7 +226,7 @@
   @media (max-width:900px){
     .filters{grid-template-columns:repeat(2,1fr);}
     .kpi-row{grid-template-columns:repeat(2,1fr);}
-    .charts{grid-template-columns:1fr;}
+    .categoria-layout{grid-template-columns:1fr;}
   }
 </style>
 </head>
@@ -267,16 +275,15 @@
 </div>
 
 <script>
-let rawRows = [];      // linhas de detalhe de NF já limpas: {fornecedor, cnpj, categoria, conta, nf, data, ano, valor}
-let resumoData = [];   // agregado por fornecedor
-let charts = {categoria:null, ranking:null};
-let linhaAberta = null;
+let rawRows = [];      // linhas de detalhe de NF já limpas: {fornecedor, categoria, conta, nf, data, ano, mes, valor}
+let charts = {categoria:null};
+let categoriaAberta = null;
+let fornecedorAberto = null;
 
 function csvUrl(sheetName){
   return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
 }
 
-// Parser de CSV que lida com campos entre aspas contendo vírgulas
 function parseCSV(text){
   const rows = [];
   let row = [], field = '', inQuotes = false;
@@ -314,17 +321,49 @@ function toNumber(v){
   return isNaN(n) ? null : n;
 }
 
-// Tenta ler datas tanto no formato dd/mm/aaaa (Excel/BR) quanto aaaa-mm-dd (ISO)
+// Lê datas em vários formatos possíveis vindos do Google Sheets/Excel:
+// ISO (aaaa-mm-dd), BR/US (dd/mm/aaaa ou mm/dd/aaaa) e número de série de data
+// (dias desde 30/12/1899, caso a célula tenha sido lida como número puro).
+// Datas fora do intervalo plausível do negócio (2024-2027) são descartadas
+// para não poluir "Última Compra" com anos aleatórios de má leitura.
 function parseDateBR(v){
-  if(!v) return null;
+  if(v === undefined || v === null) return null;
   const s = String(v).trim();
   if(!s) return null;
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if(m) return new Date(+m[1], +m[2]-1, +m[3]);
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if(m) return new Date(+m[3], +m[2]-1, +m[1]);
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
+
+  let d = null;
+
+  if(/^\d{4,6}$/.test(s)){
+    const serial = parseInt(s,10);
+    if(serial > 20000 && serial < 60000){
+      d = new Date(Date.UTC(1899,11,30) + serial*86400000);
+    }
+  }
+
+  if(!d){
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m){ d = new Date(+m[1], +m[2]-1, +m[3]); }
+  }
+
+  if(!d){
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(m){
+      const a = +m[1], b = +m[2], y = +m[3];
+      if(a > 12) d = new Date(y, b-1, a);          // a só pode ser dia
+      else if(b > 12) d = new Date(y, a-1, b);      // b só pode ser dia
+      else d = new Date(y, b-1, a);                 // ambíguo: assume dd/mm (padrão BR)
+    }
+  }
+
+  if(!d){
+    const tentativa = new Date(s);
+    if(!isNaN(tentativa.getTime())) d = tentativa;
+  }
+
+  if(!d || isNaN(d.getTime())) return null;
+  const ano = d.getFullYear();
+  if(ano < 2024 || ano > 2027) return null; // descarta datas implausíveis (erro de leitura)
+  return d;
 }
 
 function findCol(headerRow, candidates, posicaoFallback){
@@ -333,9 +372,6 @@ function findCol(headerRow, candidates, posicaoFallback){
     const idx = headerRow.findIndex(h => norm(h) === norm(cand));
     if(idx !== -1) return idx;
   }
-  // Fallback: o Google Sheets (gviz/CSV) às vezes retorna o cabeçalho em branco
-  // para colunas com números grandes ou datas, mesmo a célula estando preenchida.
-  // Nesse caso, usamos a posição fixa esperada (0-based) como último recurso.
   if(posicaoFallback !== undefined && posicaoFallback < headerRow.length) return posicaoFallback;
   return -1;
 }
@@ -374,38 +410,35 @@ async function loadAll(){
       throw new Error('Não encontrei as colunas essenciais (Fornecedor, NUMERO_NOTA) na aba TabFornecedores. Cabeçalho lido: ' + header.join(' | '));
     }
 
-    const cnpjIdxPreferido = idx.cnpjAjustado !== -1 ? idx.cnpjAjustado : idx.cnpjBruto;
-
     rawRows = rows.slice(1)
       .map(r => {
         const fornecedor = (r[idx.fornecedor]||'').trim();
-        const cnpjRaw = (r[cnpjIdxPreferido]||'').trim();
         const conta = idx.conta !== -1 ? (r[idx.conta]||'').trim() : '';
         const nfRaw = idx.nf !== -1 ? (r[idx.nf]||'').trim() : '';
         const v25 = idx.v2025 !== -1 ? toNumber(r[idx.v2025]) : null;
         const v26 = idx.v2026 !== -1 ? toNumber(r[idx.v2026]) : null;
         const dataStr = idx.data !== -1 ? r[idx.data] : '';
         const dataObj = parseDateBR(dataStr);
+        const valor = v25 !== null ? v25 : v26;
+        const ano = dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null));
+        const mes = dataObj ? (dataObj.getMonth()+1) : null;
         return {
           fornecedor,
-          cnpj: cnpjRaw.padStart(14,'0'),
           categoria: idx.categoria !== -1 ? (r[idx.categoria]||'').trim() : '',
           conta,
           nf: nfRaw,
           data: dataObj,
-          valor: v25 !== null ? v25 : v26,
-          ano: dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null)),
+          valor,
+          ano,
+          mes,
         };
       })
-      // Remove linhas de subtotal, rodapé e linha em branco
       .filter(r => r.fornecedor && r.fornecedor !== 'Total')
       .filter(r => !r.fornecedor.toLowerCase().includes('filtros aplicados'))
-      .filter(r => r.cnpj !== '00000000000000' && r.cnpj !== 'total'.padStart(14,'0'))
       .filter(r => r.conta !== 'Total')
       .filter(r => r.nf && r.nf !== 'Total')
       .filter(r => r.valor !== null);
 
-    buildResumo();
     buildFilters();
     render();
 
@@ -420,40 +453,6 @@ async function loadAll(){
     btn.disabled = false;
     btn.textContent = 'Atualizar dados';
   }
-}
-
-function buildResumo(){
-  const map = {};
-  rawRows.forEach(r => {
-    const key = r.cnpj;
-    if(!map[key]){
-      map[key] = {
-        fornecedor: r.fornecedor,
-        cnpj: r.cnpj,
-        categoria: r.categoria,
-        valorTotal: 0,
-        qtdNotas: new Set(),
-        datas: [],
-      };
-    }
-    map[key].valorTotal += r.valor;
-    map[key].qtdNotas.add(r.nf);
-    if(r.data) map[key].datas.push(r.data);
-  });
-
-  resumoData = Object.values(map).map(f => {
-    const qtd = f.qtdNotas.size;
-    const ultimaCompra = f.datas.length ? new Date(Math.max(...f.datas.map(d=>d.getTime()))) : null;
-    return {
-      fornecedor: f.fornecedor,
-      cnpj: f.cnpj,
-      categoria: f.categoria,
-      valorTotal: f.valorTotal,
-      qtdNotas: qtd,
-      ticketMedio: qtd ? f.valorTotal / qtd : 0,
-      ultimaCompra,
-    };
-  }).sort((a,b) => b.valorTotal - a.valorTotal);
 }
 
 function buildFilters(){
@@ -472,10 +471,10 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
-  catSel.onchange = () => { linhaAberta = null; render(); };
-  contaSel.onchange = () => { linhaAberta = null; render(); };
-  document.getElementById('fAno').onchange = () => { linhaAberta = null; render(); };
-  document.getElementById('fBusca').oninput = () => { linhaAberta = null; render(); };
+  catSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
+  contaSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
+  document.getElementById('fAno').onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
+  document.getElementById('fBusca').oninput = () => { render(); };
 }
 
 function getFilters(){
@@ -504,42 +503,73 @@ function fmtDate(d){
   return d.toLocaleDateString('pt-BR');
 }
 
-function render(){
-  const f = getFilters();
-
-  const rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
-
-  // Recalcula resumo dentro do filtro ativo
+// Agrupa por NOME do fornecedor (não por CNPJ) — assim unidades com múltiplos
+// CNPJs (matriz/filiais, ex: BMW do Brasil) aparecem consolidadas numa linha só.
+function resumoPorFornecedor(rows){
   const map = {};
-  rowsFiltradas.forEach(r => {
-    if(!map[r.cnpj]){
-      map[r.cnpj] = { fornecedor:r.fornecedor, cnpj:r.cnpj, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), datas:[] };
+  rows.forEach(r => {
+    if(!map[r.fornecedor]){
+      map[r.fornecedor] = { fornecedor:r.fornecedor, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), datas:[], mesesComCompra:new Set() };
     }
-    map[r.cnpj].valorTotal += r.valor;
-    map[r.cnpj].qtdNotas.add(r.nf);
-    if(r.data) map[r.cnpj].datas.push(r.data);
+    const m = map[r.fornecedor];
+    m.valorTotal += r.valor;
+    m.qtdNotas.add(r.nf);
+    if(r.data) m.datas.push(r.data);
+    if(r.ano && r.mes) m.mesesComCompra.add(r.ano+'-'+r.mes);
   });
-
-  let resumoFiltrado = Object.values(map).map(x => {
+  return Object.values(map).map(x => {
     const qtd = x.qtdNotas.size;
     const ultimaCompra = x.datas.length ? new Date(Math.max(...x.datas.map(d=>d.getTime()))) : null;
+    const nMeses = x.mesesComCompra.size;
     return {
-      fornecedor: x.fornecedor, cnpj: x.cnpj, categoria: x.categoria,
-      valorTotal: x.valorTotal, qtdNotas: qtd,
-      ticketMedio: qtd ? x.valorTotal/qtd : 0,
+      fornecedor: x.fornecedor,
+      categoria: x.categoria,
+      valorTotal: x.valorTotal,
+      qtdNotas: qtd,
+      mediaMensal: nMeses ? x.valorTotal/nMeses : null,
       ultimaCompra,
     };
   }).sort((a,b) => b.valorTotal - a.valorTotal);
+}
 
+function resumoPorCategoria(rows){
+  const map = {};
+  rows.forEach(r => {
+    const cat = r.categoria || 'Sem categoria';
+    if(!map[cat]) map[cat] = { categoria:cat, valorTotal:0, fornecedores:new Set(), notas:new Set() };
+    map[cat].valorTotal += r.valor;
+    map[cat].fornecedores.add(r.fornecedor);
+    map[cat].notas.add(r.nf);
+  });
+  return Object.values(map).map(c => ({
+    categoria: c.categoria,
+    valorTotal: c.valorTotal,
+    qtdFornecedores: c.fornecedores.size,
+    qtdNotas: c.notas.size,
+  })).sort((a,b) => b.valorTotal - a.valorTotal);
+}
+
+function render(){
+  const f = getFilters();
+  const rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
+
+  const resumoGeralFornecedor = resumoPorFornecedor(rowsFiltradas);
+  let categorias = resumoPorCategoria(rowsFiltradas);
+
+  // Se há busca ativa, só mostra categorias que tenham ao menos um fornecedor correspondente
   if(f.busca){
-    resumoFiltrado = resumoFiltrado.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
+    const catsComMatch = new Set(
+      resumoGeralFornecedor.filter(r => r.fornecedor.toLowerCase().includes(f.busca)).map(r => r.categoria || 'Sem categoria')
+    );
+    categorias = categorias.filter(c => catsComMatch.has(c.categoria));
   }
 
-  // KPIs
-  const valorTotalGeral = resumoFiltrado.reduce((s,r)=>s+r.valorTotal,0);
-  const qtdFornecedores = resumoFiltrado.length;
-  const qtdNotasGeral = resumoFiltrado.reduce((s,r)=>s+r.qtdNotas,0);
-  const ticketMedioGeral = qtdNotasGeral ? valorTotalGeral/qtdNotasGeral : 0;
+  // KPIs gerais (sobre todo o escopo filtrado, não só a categoria aberta)
+  const valorTotalGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.valorTotal,0);
+  const qtdFornecedoresGeral = resumoGeralFornecedor.length;
+  const qtdNotasGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.qtdNotas,0);
+  const mesesGeral = new Set(rowsFiltradas.filter(r=>r.ano&&r.mes).map(r=>r.ano+'-'+r.mes)).size;
+  const mediaMensalGeral = mesesGeral ? valorTotalGeral/mesesGeral : null;
 
   let html = `<div class="kpi-row">
     <div class="card c-valor" style="animation-delay:0s">
@@ -555,8 +585,8 @@ function render(){
         <svg class="kpi-icon-svg" viewBox="0 0 24 24" fill="none" stroke="#1f8a5f" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
         Fornecedores
       </div>
-      <div class="kpi-value">${qtdFornecedores}</div>
-      <div class="kpi-sub">CNPJs únicos</div>
+      <div class="kpi-value">${qtdFornecedoresGeral}</div>
+      <div class="kpi-sub">nomes únicos</div>
     </div>
     <div class="card c-notas" style="animation-delay:0.16s">
       <div class="kpi-label">
@@ -569,127 +599,128 @@ function render(){
     <div class="card c-ticket" style="animation-delay:0.24s">
       <div class="kpi-label">
         <svg class="kpi-icon-svg" viewBox="0 0 24 24" fill="none" stroke="#5b7ba8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-        Ticket Médio
+        Média Mensal
       </div>
-      <div class="kpi-value">R$ ${fmt(ticketMedioGeral)}</div>
-      <div class="kpi-sub">por nota fiscal</div>
+      <div class="kpi-value">R$ ${fmt(mediaMensalGeral)}</div>
+      <div class="kpi-sub">gasto médio por mês</div>
     </div>
   </div>`;
 
-  // Tabela de ranking
-  let tableRows = '';
-  resumoFiltrado.forEach((r, i) => {
-    const rowId = `row-${i}`;
-    const aberta = linhaAberta === r.cnpj;
-    tableRows += `<tr class="fornecedor-row${aberta?' aberto':''}" onclick="toggleDrill('${r.cnpj}')">
-      <td>${r.fornecedor}</td>
-      <td><span class="badge">${r.categoria || '—'}</span></td>
-      <td>${r.qtdNotas}</td>
-      <td>R$ ${fmt(r.ticketMedio)}</td>
-      <td>${fmtDate(r.ultimaCompra)}</td>
-      <td class="total">R$ ${fmt(r.valorTotal)}</td>
+  // ---- Nível 1: Categorias (tabela + gráfico lado a lado) ----
+  let catRows = '';
+  categorias.forEach(c => {
+    const aberta = categoriaAberta === c.categoria;
+    catRows += `<tr class="click-row${aberta?' aberto':''}" onclick="toggleCategoria('${c.categoria.replace(/'/g,"\\'")}')">
+      <td><span class="chevron${aberta?' aberto':''}">▶</span>${c.categoria}</td>
+      <td>${c.qtdFornecedores}</td>
+      <td>${c.qtdNotas}</td>
+      <td class="total">R$ ${fmt(c.valorTotal)}</td>
     </tr>`;
     if(aberta){
-      tableRows += `<tr><td colspan="6" style="padding:0; border-bottom:none;">${buildDrillHtml(r.cnpj, f)}</td></tr>`;
+      catRows += `<tr><td colspan="4" style="padding:0; border-bottom:none;">${buildFornecedorSubTabela(c.categoria, rowsFiltradas, f)}</td></tr>`;
     }
   });
 
   html += `<section class="block">
-    <h2>Ranking de Fornecedores <span class="note" style="display:inline;">(clique numa linha para ver as notas)</span></h2>
-    <div style="overflow-x:auto;">
-    <table class="monthly">
-      <thead><tr><th>Fornecedor</th><th>Categoria</th><th>Qtd Notas</th><th>Ticket Médio</th><th>Última Compra</th><th class="total">Valor Total</th></tr></thead>
-      <tbody>${tableRows || '<tr><td colspan="6" style="text-align:center;">Nenhum fornecedor encontrado com esses filtros.</td></tr>'}</tbody>
-    </table>
+    <h2>Categorias <span class="note" style="display:inline;">(clique para ver os fornecedores)</span></h2>
+    <div class="categoria-layout">
+      <div style="overflow-x:auto;">
+        <table class="monthly">
+          <thead><tr><th>Categoria</th><th>Fornecedores</th><th>Notas</th><th class="total">Valor Total</th></tr></thead>
+          <tbody>${catRows || '<tr><td colspan="4" style="text-align:center;">Nenhuma categoria encontrada com esses filtros.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="chart-box-cat"><canvas id="chartCategoria"></canvas></div>
     </div>
   </section>`;
 
-  html += `<div class="charts">
-    <div class="block">
-      <h2>Valor por Categoria</h2>
-      <div class="chart-box"><canvas id="chartCategoria"></canvas></div>
-    </div>
-    <div class="block">
-      <h2>Top 10 Fornecedores por Valor</h2>
-      <div class="chart-box"><canvas id="chartRanking"></canvas></div>
-    </div>
-  </div>`;
-
   document.getElementById('content').innerHTML = html;
-
-  renderChartCategoria(resumoFiltrado);
-  renderChartRanking(resumoFiltrado);
+  renderChartCategoria(categorias);
 }
 
-function buildDrillHtml(cnpj, f){
-  const notas = rawRows
-    .filter(r => r.cnpj === cnpj && matchesFilters(r, f))
-    .sort((a,b) => (b.data?.getTime()||0) - (a.data?.getTime()||0));
+function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
+  let rowsDaCategoria = rowsFiltradas.filter(r => (r.categoria || 'Sem categoria') === categoria);
+  let resumo = resumoPorFornecedor(rowsDaCategoria);
 
-  const rows = notas.map(n => `<tr>
-      <td>${fmtDate(n.data)}</td>
-      <td>${n.conta || '-'}</td>
-      <td>${n.nf}</td>
-      <td class="total">R$ ${fmt(n.valor)}</td>
-    </tr>`).join('');
+  if(f.busca){
+    resumo = resumo.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
+  }
 
-  return `<div class="drill-wrap">
+  let rows = '';
+  resumo.forEach(r => {
+    const abertoF = fornecedorAberto === (categoria + '::' + r.fornecedor);
+    rows += `<tr class="click-row${abertoF?' aberto':''}" onclick="event.stopPropagation(); toggleFornecedor('${categoria.replace(/'/g,"\\'")}','${r.fornecedor.replace(/'/g,"\\'")}')">
+      <td>${r.fornecedor}</td>
+      <td>${r.qtdNotas}</td>
+      <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
+      <td>${fmtDate(r.ultimaCompra)}</td>
+      <td class="total">R$ ${fmt(r.valorTotal)}</td>
+    </tr>`;
+    if(abertoF){
+      const notas = rowsDaCategoria
+        .filter(n => n.fornecedor === r.fornecedor)
+        .sort((a,b) => (b.data?.getTime()||0) - (a.data?.getTime()||0));
+      const notasRows = notas.map(n => `<tr>
+          <td>${fmtDate(n.data)}</td>
+          <td>${n.conta || '-'}</td>
+          <td>${n.nf}</td>
+          <td class="total">R$ ${fmt(n.valor)}</td>
+        </tr>`).join('');
+      rows += `<tr><td colspan="5" style="padding:0; border-bottom:none;">
+        <div class="sub-block">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <strong style="color:var(--navy); font-size:0.85rem;">Notas fiscais — ${notas.length} encontrada(s)</strong>
+            <span class="sub-close" onclick="event.stopPropagation(); fornecedorAberto=null; render();">Fechar</span>
+          </div>
+          <div style="max-height:300px; overflow-y:auto;">
+          <table class="monthly">
+            <thead><tr><th>Data</th><th>Conta Contábil</th><th>Nº NF</th><th class="total">Valor</th></tr></thead>
+            <tbody>${notasRows || '<tr><td colspan="4" style="text-align:center;">Sem notas nesse filtro.</td></tr>'}</tbody>
+          </table>
+          </div>
+        </div>
+      </td></tr>`;
+    }
+  });
+
+  return `<div class="sub-block">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <strong style="color:var(--navy); font-size:0.85rem;">Notas fiscais — ${notas.length} encontrada(s)</strong>
-      <span class="drill-close" onclick="event.stopPropagation(); linhaAberta=null; render();">Fechar</span>
+      <strong style="color:var(--navy); font-size:0.85rem;">Fornecedores em "${categoria}"</strong>
+      <span class="sub-close" onclick="event.stopPropagation(); categoriaAberta=null; fornecedorAberto=null; render();">Fechar categoria</span>
     </div>
-    <div style="max-height:320px; overflow-y:auto;">
+    <div style="overflow-x:auto;">
     <table class="monthly">
-      <thead><tr><th>Data</th><th>Conta Contábil</th><th>Nº NF</th><th class="total">Valor</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;">Sem notas nesse filtro.</td></tr>'}</tbody>
+      <thead><tr><th>Fornecedor</th><th>Qtd Notas</th><th>Média Mensal</th><th>Última Compra</th><th class="total">Valor Total</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" style="text-align:center;">Nenhum fornecedor encontrado.</td></tr>'}</tbody>
     </table>
     </div>
   </div>`;
 }
 
-function toggleDrill(cnpj){
-  linhaAberta = (linhaAberta === cnpj) ? null : cnpj;
+function toggleCategoria(categoria){
+  categoriaAberta = (categoriaAberta === categoria) ? null : categoria;
+  fornecedorAberto = null;
   render();
 }
 
-function renderChartCategoria(resumo){
-  const porCategoria = {};
-  resumo.forEach(r => {
-    const cat = r.categoria || 'Sem categoria';
-    porCategoria[cat] = (porCategoria[cat]||0) + r.valorTotal;
-  });
-  const arr = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]);
+function toggleFornecedor(categoria, fornecedor){
+  const key = categoria + '::' + fornecedor;
+  fornecedorAberto = (fornecedorAberto === key) ? null : key;
+  render();
+}
 
+function renderChartCategoria(categorias){
   const ctx = document.getElementById('chartCategoria');
   if(charts.categoria) charts.categoria.destroy();
   charts.categoria = new Chart(ctx, {
     type:'doughnut',
     data:{
-      labels: arr.map(a=>a[0]),
-      datasets:[{ data: arr.map(a=>a[1]), backgroundColor:['#0f2440','#16345c','#1f8a5f','#c8442d','#d9a441','#6b7789','#8ca3c2','#a9425a','#3d7a6e'] }]
+      labels: categorias.map(c=>c.categoria),
+      datasets:[{ data: categorias.map(c=>c.valorTotal), backgroundColor:['#0f2440','#16345c','#1f8a5f','#c8442d','#d9a441','#6b7789','#8ca3c2','#a9425a','#3d7a6e'] }]
     },
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ position:'right', labels:{ boxWidth:12, font:{size:11} } } }
-    }
-  });
-}
-
-function renderChartRanking(resumo){
-  const top10 = resumo.slice(0,10);
-  const ctx = document.getElementById('chartRanking');
-  if(charts.ranking) charts.ranking.destroy();
-  charts.ranking = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: top10.map(r=>r.fornecedor.length>28 ? r.fornecedor.slice(0,28)+'…' : r.fornecedor),
-      datasets:[{ data: top10.map(r=>r.valorTotal), backgroundColor:'#0f2440', borderRadius:4 }]
-    },
-    options:{
-      indexAxis:'y',
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{ x:{ grid:{color:'#eef1f5'} }, y:{ grid:{display:false} } }
+      plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } }
     }
   });
 }
