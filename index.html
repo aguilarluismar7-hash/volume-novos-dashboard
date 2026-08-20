@@ -295,12 +295,16 @@ function parseDateBR(v){
   return isNaN(d.getTime()) ? null : d;
 }
 
-function findCol(headerRow, candidates){
+function findCol(headerRow, candidates, posicaoFallback){
   const norm = h => (h||'').trim().toLowerCase();
   for(const cand of candidates){
     const idx = headerRow.findIndex(h => norm(h) === norm(cand));
     if(idx !== -1) return idx;
   }
+  // Fallback: o Google Sheets (gviz/CSV) às vezes retorna o cabeçalho em branco
+  // para colunas com números grandes ou datas, mesmo a célula estando preenchida.
+  // Nesse caso, usamos a posição fixa esperada (0-based) como último recurso.
+  if(posicaoFallback !== undefined && posicaoFallback < headerRow.length) return posicaoFallback;
   return -1;
 }
 
@@ -323,15 +327,15 @@ async function loadAll(){
     const header = rows[0] || [];
 
     const idx = {
-      fornecedor: findCol(header, ['Fornecedor']),
-      cnpjBruto: findCol(header, ['FORNECEDOR_CNPJ']),
-      cnpjAjustado: findCol(header, ['Fornecedor Ajustado','CNPJ Ajustado']),
-      categoria: findCol(header, ['Categorias','Categoria']),
-      conta: findCol(header, ['CONTA_CONTABIL_DESCRICAO','Conta_Contabil']),
-      nf: findCol(header, ['NUMERO_NOTA','Numero_Nota']),
-      data: findCol(header, ['DATA_ENTRADA mais recente','Data']),
-      v2025: findCol(header, ['2025']),
-      v2026: findCol(header, ['2026']),
+      fornecedor: findCol(header, ['Fornecedor'], 0),
+      cnpjBruto: findCol(header, ['FORNECEDOR_CNPJ'], 1),
+      cnpjAjustado: findCol(header, ['Fornecedor Ajustado','CNPJ Ajustado'], 2),
+      categoria: findCol(header, ['Categorias','Categoria'], 3),
+      conta: findCol(header, ['CONTA_CONTABIL_DESCRICAO','Conta_Contabil'], 4),
+      nf: findCol(header, ['NUMERO_NOTA','Numero_Nota'], 5),
+      data: findCol(header, ['DATA_ENTRADA mais recente','Data'], 6),
+      v2025: findCol(header, ['2025'], 7),
+      v2026: findCol(header, ['2026'], 8),
     };
 
     if(idx.fornecedor === -1 || idx.nf === -1){
