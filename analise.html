@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Análise Estratégica de Fornecedores | Grupo Raviera</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/shared.css">
+<style>
+  .wrap{max-width:1180px;margin:0 auto;}
+  header{margin-bottom:22px;}
+  h1{font-size:1.55rem;font-weight:700;margin:0 0 4px;color:var(--navy);letter-spacing:-0.01em;}
+  .subtitle{color:var(--muted);font-size:0.92rem;}
+  #refreshBtn{
+    background:var(--navy); color:#fff; border:none; padding:7px 14px;
+    border-radius:7px; font-size:0.8rem; cursor:pointer; font-weight:600;
+  }
+  #refreshBtn:hover{background:var(--navy-2);}
+  #refreshBtn:disabled{opacity:0.6;cursor:default;}
+  .status{text-align:right;font-size:0.78rem;color:var(--muted);display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:10px;}
+
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:18px 20px; border-left:4px solid var(--border);
+  }
+  .card.c-a{border-left-color:#0f2440;}
+  .card.c-b{border-left-color:#c8442d;}
+  .card.c-c{border-left-color:#1f8a5f;}
+  .card.c-d{border-left-color:#d9a441;}
+  .kpi-label{font-size:0.7rem;font-weight:700;letter-spacing:0.04em;color:var(--slate);text-transform:uppercase;margin-bottom:10px;}
+  .kpi-value{font-size:1.5rem;font-weight:700;color:var(--navy);line-height:1.15;}
+
+  section.block{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin-bottom:16px;}
+  .block h2{font-size:1rem;font-weight:700;color:var(--navy);margin:0 0 6px;}
+  .block .desc{font-size:0.85rem;color:var(--muted);margin-bottom:16px;line-height:1.55;}
+  .insight-box{
+    background:#f7f9fc; border:1px solid var(--border); border-left:4px solid #0f2440;
+    border-radius:8px; padding:14px 16px; margin-bottom:16px; font-size:0.87rem; line-height:1.65; color:var(--text);
+  }
+  .insight-box strong{color:var(--navy);}
+  .fonte{font-size:0.72rem; color:var(--muted); margin-top:8px; font-style:italic;}
+
+  table.monthly{width:100%;border-collapse:collapse;font-size:0.85rem;}
+  table.monthly th, table.monthly td{padding:9px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;}
+  table.monthly th:first-child, table.monthly td:first-child{text-align:left;min-width:130px;color:var(--slate);font-weight:600;}
+  table.monthly thead th{color:var(--muted);font-weight:700;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.03em;text-align:center;}
+  table.monthly td.total, table.monthly th.total{font-weight:700;color:var(--navy);border-left:2px solid var(--border);}
+  table.monthly tbody tr:last-child td{border-bottom:none;}
+
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:0.72rem;font-weight:600;}
+  .badge-simples{background:#fdf3e3;color:#a8721c;}
+  .badge-nao-simples{background:#eef2f7;color:var(--navy);}
+  .badge-mensal{background:#e8f5ee;color:#1f8a5f;}
+  .badge-trimestral{background:#fdf3e3;color:#a8721c;}
+  .badge-pontual{background:#fbeae7;color:#c8442d;}
+  .badge-cat{background:#eef2f7;color:var(--navy);}
+  .badge-pendente{background:#f1f1f1;color:var(--slate);}
+
+  .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .chart-box{position:relative;height:280px;}
+
+  .note{font-size:0.78rem;color:var(--muted);margin-top:10px;line-height:1.5;}
+  .loading, .error{text-align:center;padding:60px 20px;color:var(--muted);}
+  .error{color:var(--red);}
+  @media (max-width:900px){
+    .kpi-row{grid-template-columns:repeat(2,1fr);}
+    .charts-row{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<nav class="sidebar" id="sidebar-root"></nav>
+<script src="/sidebar.js"></script>
+<div class="main">
+<div class="wrap">
+  <header>
+    <h1>Análise Estratégica de Fornecedores</h1>
+    <div class="subtitle">Fornecedores identificados por número (1–15, ordenados por valor) · Base: Top 15 Fornecedores · 2025–2026</div>
+    <div class="status">
+      <span id="lastUpdated">Carregando…</span>
+      <button id="refreshBtn" onclick="loadAll()">Atualizar dados</button>
+    </div>
+  </header>
+
+  <div id="content">
+    <div class="loading">Carregando dados da planilha…</div>
+  </div>
+</div>
+</div>
+
+<script>
+let fornecedores = []; // resumo por fornecedor, já anonimizado: {rank, categoria, valorTotal, qtdNotas, mesesComCompra, cnpjs:[], simples:null|true|false, situacao, pendenteEnriquecimento}
+let charts = {recorrencia:null, simples:null};
+
+function csvUrl(sheetName){
+  return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
+}
+
+function parseCSV(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){ if(text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; } }
+      else { field += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(c === '\r'){ /* skip */ }
+      else { field += c; }
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length===1 && r[0] !== ''));
+}
+
+async function fetchSheet(name){
+  const res = await fetch(csvUrl(name), { cache: 'no-store' });
+  if(!res.ok) throw new Error(`Não consegui ler a aba "${name}" (status ${res.status})`);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+function toNumber(v){
+  if(v === undefined || v === null || v === '') return null;
+  const s = String(v).trim();
+  if(s === '') return null;
+  const n = parseFloat(s.replace(/\./g,'').replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+
+function parseDateBR(v){
+  if(v === undefined || v === null) return null;
+  const s = String(v).trim();
+  if(!s) return null;
+  let d = null;
+  if(/^\d{4,6}$/.test(s)){
+    const serial = parseInt(s,10);
+    if(serial > 20000 && serial < 60000) d = new Date(Date.UTC(1899,11,30) + serial*86400000);
+  }
+  if(!d){ let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) d = new Date(+m[1], +m[2]-1, +m[3]); }
+  if(!d){
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(m){
+      const a=+m[1], b=+m[2], y=+m[3];
+      if(a>12) d = new Date(y,b-1,a);
+      else if(b>12) d = new Date(y,a-1,b);
+      else d = new Date(y,b-1,a);
+    }
+  }
+  if(!d){ const t = new Date(s); if(!isNaN(t.getTime())) d = t; }
+  if(!d || isNaN(d.getTime())) return null;
+  const ano = d.getFullYear();
+  if(ano < 2024 || ano > 2027) return null;
+  return d;
+}
+
+function findCol(headerRow, candidates, posicaoFallback){
+  const norm = h => (h||'').trim().toLowerCase();
+  for(const cand of candidates){
+    const idx = headerRow.findIndex(h => norm(h) === norm(cand));
+    if(idx !== -1) return idx;
+  }
+  if(posicaoFallback !== undefined && posicaoFallback < headerRow.length) return posicaoFallback;
+  return -1;
+}
+
+function parseBooleanPTBR(v){
+  const s = (v||'').trim().toUpperCase();
+  if(s === 'VERDADEIRO' || s === 'TRUE' || s === '1') return true;
+  if(s === 'FALSO' || s === 'FALSE' || s === '0') return false;
+  return null; // vazio/não informado
+}
+
+function fmt(n){
+  if(n === null || n === undefined || isNaN(n)) return '-';
+  return n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+async function loadAll(){
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true; btn.textContent = 'Atualizando…';
+  document.getElementById('content').innerHTML = '<div class="loading">Carregando dados da planilha…</div>';
+
+  if(typeof Chart === 'undefined'){
+    document.getElementById('content').innerHTML = '<div class="error">A biblioteca de gráficos não carregou. Recarregue a página.</div>';
+    btn.disabled = false; btn.textContent = 'Atualizar dados';
+    return;
+  }
+
+  try{
+    const [rowsForn, rowsCnae] = await Promise.all([
+      fetchSheet('TabFornecedores'),
+      fetchSheet('TabCNAE'),
+    ]);
+
+    // ---- TabFornecedores (nível de NF) ----
+    const hF = rowsForn[0] || [];
+    const idxF = {
+      fornecedor: findCol(hF, ['Fornecedor'], 0),
+      cnpjAjustado: findCol(hF, ['Fornecedor Ajustado','CNPJ Ajustado'], 2),
+      categoria: findCol(hF, ['Categorias','Categoria'], 3),
+      nf: findCol(hF, ['NUMERO_NOTA','Numero_Nota'], 5),
+      data: findCol(hF, ['DATA_ENTRADA mais recente','Data'], 6),
+      v2025: findCol(hF, ['2025'], 7),
+      v2026: findCol(hF, ['2026'], 8),
+    };
+
+    const nfRows = rowsForn.slice(1).map(r => {
+      const fornecedor = (r[idxF.fornecedor]||'').trim();
+      const cnpj = (r[idxF.cnpjAjustado]||'').trim().padStart(14,'0');
+      const nf = (r[idxF.nf]||'').trim();
+      const v25 = toNumber(r[idxF.v2025]);
+      const v26 = toNumber(r[idxF.v2026]);
+      const dataObj = parseDateBR(r[idxF.data]);
+      const valor = v25 !== null ? v25 : v26;
+      const ano = dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null));
+      const mes = dataObj ? (dataObj.getMonth()+1) : null;
+      return { fornecedor, cnpj, categoria: (r[idxF.categoria]||'').trim(), nf, valor, ano, mes };
+    })
+    .filter(r => r.fornecedor && r.fornecedor !== 'Total')
+    .filter(r => !r.fornecedor.toLowerCase().includes('filtros aplicados'))
+    .filter(r => r.nf && r.nf !== 'Total')
+    .filter(r => r.valor !== null);
+
+    // ---- TabCNAE (enriquecimento por CNPJ) ----
+    const hC = rowsCnae[0] || [];
+    const idxC = {
+      cnpj: findCol(hC, ['cnpj'], 0),
+      cnaeDescricao: findCol(hC, ['cnae_descricao'], 4),
+      opcaoSimples: findCol(hC, ['opcao_pelo_simples'], 5),
+      situacao: findCol(hC, ['situacao_cadastral'], 6),
+    };
+    const mapCnae = {};
+    rowsCnae.slice(1).forEach(r => {
+      const cnpj = (r[idxC.cnpj]||'').trim().padStart(14,'0');
+      if(!cnpj) return;
+      mapCnae[cnpj] = {
+        cnaeDescricao: idxC.cnaeDescricao !== -1 ? (r[idxC.cnaeDescricao]||'').trim() : '',
+        simples: idxC.opcaoSimples !== -1 ? parseBooleanPTBR(r[idxC.opcaoSimples]) : null,
+        situacao: idxC.situacao !== -1 ? (r[idxC.situacao]||'').trim() : '',
+        pendente: idxC.situacao !== -1 ? !(r[idxC.situacao]||'').trim() : true,
+      };
+    });
+
+    // ---- Agrega por FORNECEDOR (nome) ----
+    const map = {};
+    nfRows.forEach(r => {
+      if(!map[r.fornecedor]){
+        map[r.fornecedor] = { fornecedor:r.fornecedor, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), mesesComCompra:new Set(), cnpjs:new Set() };
+      }
+      const m = map[r.fornecedor];
+      m.valorTotal += r.valor;
+      m.qtdNotas.add(r.nf);
+      if(r.ano && r.mes) m.mesesComCompra.add(r.ano+'-'+r.mes);
+      if(r.cnpj) m.cnpjs.add(r.cnpj);
+    });
+
+    let lista = Object.values(map).map(m => {
+      const cnpjsArr = [...m.cnpjs];
+      const infosCnae = cnpjsArr.map(c => mapCnae[c]).filter(Boolean);
+      const algumSimples = infosCnae.some(i => i.simples === true);
+      const todosPendentes = infosCnae.length === 0 || infosCnae.every(i => i.pendente);
+      const nMeses = m.mesesComCompra.size;
+      let recorrencia;
+      if(nMeses >= 10) recorrencia = 'Mensal';
+      else if(nMeses >= 4) recorrencia = 'Trimestral/Sazonal';
+      else recorrencia = 'Pontual';
+
+      return {
+        fornecedor: m.fornecedor,
+        categoria: m.categoria,
+        valorTotal: m.valorTotal,
+        qtdNotas: m.qtdNotas.size,
+        mesesComCompra: nMeses,
+        recorrencia,
+        simples: todosPendentes ? null : algumSimples,
+        pendente: todosPendentes,
+      };
+    }).sort((a,b) => b.valorTotal - a.valorTotal);
+
+    // Anonimização: rank por posição no valor (1 = maior)
+    lista.forEach((f, i) => { f.rank = i+1; f.label = `Fornecedor ${i+1}`; });
+
+    fornecedores = lista;
+    render();
+
+    document.getElementById('lastUpdated').textContent = 'Atualizado em ' + new Date().toLocaleString('pt-BR');
+  } catch(err){
+    document.getElementById('content').innerHTML =
+      `<div class="error">Não consegui carregar os dados da planilha.<br>${err.message}</div>`;
+    document.getElementById('lastUpdated').textContent = 'Falha ao atualizar';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Atualizar dados';
+  }
+}
+
+function render(){
+  const valorTotal = fornecedores.reduce((s,f)=>s+f.valorTotal,0);
+  const simplesLista = fornecedores.filter(f => f.simples === true);
+  const valorSimples = simplesLista.reduce((s,f)=>s+f.valorTotal,0);
+  const pctValorSimples = valorTotal ? (valorSimples/valorTotal*100) : 0;
+  const qtdMensal = fornecedores.filter(f => f.recorrencia === 'Mensal').length;
+  const qtdPendentes = fornecedores.filter(f => f.pendente).length;
+
+  let html = `<div class="kpi-row">
+    <div class="card c-a">
+      <div class="kpi-label">Fornecedores</div>
+      <div class="kpi-value">${fornecedores.length}</div>
+    </div>
+    <div class="card c-b">
+      <div class="kpi-label">Optantes pelo Simples</div>
+      <div class="kpi-value">${simplesLista.length}</div>
+    </div>
+    <div class="card c-c">
+      <div class="kpi-label">% do Valor em Simples</div>
+      <div class="kpi-value">${pctValorSimples.toFixed(1)}%</div>
+    </div>
+    <div class="card c-d">
+      <div class="kpi-label">Recorrência Mensal</div>
+      <div class="kpi-value">${qtdMensal} de ${fornecedores.length}</div>
+    </div>
+  </div>`;
+
+  // ---- Bloco 1: Simples Nacional + Reforma Tributária ----
+  let simplesRows = simplesLista.map(f => `<tr>
+      <td>${f.label}</td>
+      <td><span class="badge badge-cat">${f.categoria||'—'}</span></td>
+      <td class="total">R$ ${fmt(f.valorTotal)}</td>
+    </tr>`).join('');
+
+  html += `<section class="block">
+    <h2>Fornecedores Optantes pelo Simples Nacional</h2>
+    <div class="desc">Destes 15 fornecedores, <strong>${simplesLista.length}</strong> são optantes pelo Simples Nacional, representando <strong>${pctValorSimples.toFixed(1)}%</strong> do valor total analisado.</div>
+
+    <div class="insight-box">
+      <strong>Impacto da Reforma Tributária (IBS/CBS) a observar:</strong> 2026 é um ano de teste, com alíquotas simbólicas e sem recolhimento efetivo para o Simples Nacional. A partir de 2027, a CBS entra em vigor de fato e o Simples passa a destacar IBS/CBS na nota fiscal. O ponto de atenção para o Grupo Raviera como <strong>comprador</strong>: fornecedores no Simples padrão tendem a gerar menos crédito tributário de IBS/CBS do que fornecedores no regime normal — o que pode tornar essas compras relativamente mais caras em termos de crédito recuperável a partir de 2027. Vale reavaliar, com antecedência, se algum desses fornecedores pretende migrar para o "Simples Híbrido" (que gera crédito mais completo, mas com apuração mais complexa) ou se compensa buscar alternativas no regime normal para os itens de maior valor.
+      <div class="fonte">Baseado nas regras da Reforma Tributária (EC 132/2023, LC 214/2025) e no cronograma de transição 2026–2033 divulgado por fontes contábeis especializadas.</div>
+    </div>
+
+    <table class="monthly">
+      <thead><tr><th>Fornecedor</th><th>Categoria</th><th class="total">Valor Total</th></tr></thead>
+      <tbody>${simplesRows || '<tr><td colspan="3" style="text-align:center;">Nenhum fornecedor optante pelo Simples nesta base.</td></tr>'}</tbody>
+    </table>
+    ${qtdPendentes ? `<div class="note">⚠ ${qtdPendentes} fornecedor(es) ainda sem dado de Simples/CNAE enriquecido — pendente de consulta.</div>` : ''}
+  </section>`;
+
+  // ---- Bloco 2: Recorrência ----
+  const corRecorrencia = { 'Mensal':'badge-mensal', 'Trimestral/Sazonal':'badge-trimestral', 'Pontual':'badge-pontual' };
+  let recRows = fornecedores.map(f => `<tr>
+      <td>${f.label}</td>
+      <td><span class="badge ${corRecorrencia[f.recorrencia]}">${f.recorrencia}</span></td>
+      <td>${f.mesesComCompra}</td>
+      <td>${f.qtdNotas}</td>
+      <td class="total">R$ ${fmt(f.valorTotal)}</td>
+    </tr>`).join('');
+
+  const contagemRec = { 'Mensal':0, 'Trimestral/Sazonal':0, 'Pontual':0 };
+  fornecedores.forEach(f => contagemRec[f.recorrencia]++);
+
+  html += `<section class="block">
+    <h2>Recorrência de Compra</h2>
+    <div class="desc">Classificação baseada em quantos meses distintos cada fornecedor teve pelo menos uma compra registrada no período. Mensal = 10+ meses · Trimestral/Sazonal = 4 a 9 meses · Pontual = até 3 meses.</div>
+    <div class="charts-row">
+      <div style="overflow-x:auto;">
+        <table class="monthly">
+          <thead><tr><th>Fornecedor</th><th>Recorrência</th><th>Meses c/ Compra</th><th>Notas</th><th class="total">Valor Total</th></tr></thead>
+          <tbody>${recRows}</tbody>
+        </table>
+      </div>
+      <div class="chart-box"><canvas id="chartRecorrencia"></canvas></div>
+    </div>
+  </section>`;
+
+  html += `<div class="note">Mais análises serão adicionadas aqui conforme o projeto evoluir.</div>`;
+
+  document.getElementById('content').innerHTML = html;
+  renderChartRecorrencia(contagemRec);
+}
+
+function renderChartRecorrencia(contagem){
+  const ctx = document.getElementById('chartRecorrencia');
+  if(charts.recorrencia) charts.recorrencia.destroy();
+  charts.recorrencia = new Chart(ctx, {
+    type:'doughnut',
+    data:{
+      labels: Object.keys(contagem),
+      datasets:[{ data: Object.values(contagem), backgroundColor:['#1f8a5f','#d9a441','#c8442d'] }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } }
+    }
+  });
+}
+
+loadAll();
+</script>
+</body>
+</html>
