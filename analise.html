@@ -192,78 +192,58 @@ async function loadAll(){
   }
 
   try{
-    const [rowsForn, rowsCnae] = await Promise.all([
-      fetchSheet('TabFornecedores'),
-      fetchSheet('TabCNAE'),
-    ]);
+    const rowsForn = await fetchSheet('TabFornecedores');
 
-    // ---- TabFornecedores (nível de NF) ----
     const hF = rowsForn[0] || [];
     const idxF = {
       fornecedor: findCol(hF, ['Fornecedor'], 0),
-      cnpjAjustado: findCol(hF, ['Fornecedor Ajustado','CNPJ Ajustado'], 2),
-      categoria: findCol(hF, ['Categorias','Categoria'], 3),
-      nf: findCol(hF, ['NUMERO_NOTA','Numero_Nota'], 5),
-      data: findCol(hF, ['DATA_ENTRADA mais recente','Data'], 6),
-      v2025: findCol(hF, ['2025'], 7),
-      v2026: findCol(hF, ['2026'], 8),
+      label: findCol(hF, ['Fornecedor Ajustado'], 1),
+      cnpjAjustado: findCol(hF, ['CNPJ Ajustado'], 3),
+      optanteSimples: findCol(hF, ['Optante Simples'], 4),
+      categoria: findCol(hF, ['Categorias','Categoria'], 6),
+      nf: findCol(hF, ['NUMERO_NOTA','Numero_Nota'], 8),
+      data: findCol(hF, ['DATA_ENTRADA mais recente','Data'], 9),
+      v2025: findCol(hF, ['2025'], 10),
+      v2026: findCol(hF, ['2026'], 11),
     };
 
     const nfRows = rowsForn.slice(1).map(r => {
       const fornecedor = (r[idxF.fornecedor]||'').trim();
-      const cnpj = (r[idxF.cnpjAjustado]||'').trim().padStart(14,'0');
-      const nf = (r[idxF.nf]||'').trim();
+      const label = (r[idxF.label]||'').trim();
       const v25 = toNumber(r[idxF.v2025]);
       const v26 = toNumber(r[idxF.v2026]);
       const dataObj = parseDateBR(r[idxF.data]);
       const valor = v25 !== null ? v25 : v26;
       const ano = dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null));
       const mes = dataObj ? (dataObj.getMonth()+1) : null;
-      return { fornecedor, cnpj, categoria: (r[idxF.categoria]||'').trim(), nf, valor, ano, mes };
+      const simplesRaw = (r[idxF.optanteSimples]||'').toString().trim();
+      const simples = simplesRaw === '1' ? true : (simplesRaw === '0' ? false : null);
+      return {
+        fornecedor, label,
+        categoria: (r[idxF.categoria]||'').trim(),
+        nf: (r[idxF.nf]||'').trim(),
+        valor, ano, mes, simples,
+      };
     })
     .filter(r => r.fornecedor && r.fornecedor !== 'Total')
     .filter(r => !r.fornecedor.toLowerCase().includes('filtros aplicados'))
     .filter(r => r.nf && r.nf !== 'Total')
     .filter(r => r.valor !== null);
 
-    // ---- TabCNAE (enriquecimento por CNPJ) ----
-    const hC = rowsCnae[0] || [];
-    const idxC = {
-      cnpj: findCol(hC, ['cnpj'], 0),
-      cnaeDescricao: findCol(hC, ['cnae_descricao'], 4),
-      opcaoSimples: findCol(hC, ['opcao_pelo_simples'], 5),
-      situacao: findCol(hC, ['situacao_cadastral'], 6),
-    };
-    const mapCnae = {};
-    rowsCnae.slice(1).forEach(r => {
-      const cnpj = (r[idxC.cnpj]||'').trim().padStart(14,'0');
-      if(!cnpj) return;
-      mapCnae[cnpj] = {
-        cnaeDescricao: idxC.cnaeDescricao !== -1 ? (r[idxC.cnaeDescricao]||'').trim() : '',
-        simples: idxC.opcaoSimples !== -1 ? parseBooleanPTBR(r[idxC.opcaoSimples]) : null,
-        situacao: idxC.situacao !== -1 ? (r[idxC.situacao]||'').trim() : '',
-        pendente: idxC.situacao !== -1 ? !(r[idxC.situacao]||'').trim() : true,
-      };
-    });
-
-    // ---- Agrega por FORNECEDOR (nome) ----
+    // ---- Agrega por FORNECEDOR (nome real, usando o rótulo anonimizado já pronto na planilha) ----
     const map = {};
     nfRows.forEach(r => {
       if(!map[r.fornecedor]){
-        map[r.fornecedor] = { fornecedor:r.fornecedor, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), mesesComCompra:new Set(), cnpjs:new Set() };
+        map[r.fornecedor] = { fornecedor:r.fornecedor, label:r.label, categoria:r.categoria, valorTotal:0, qtdNotas:new Set(), mesesComCompra:new Set(), simples:r.simples };
       }
       const m = map[r.fornecedor];
       m.valorTotal += r.valor;
       m.qtdNotas.add(r.nf);
       if(r.ano && r.mes) m.mesesComCompra.add(r.ano+'-'+r.mes);
-      if(r.cnpj) m.cnpjs.add(r.cnpj);
+      if(m.simples === null && r.simples !== null) m.simples = r.simples;
     });
 
     let lista = Object.values(map).map(m => {
-      const cnpjsArr = [...m.cnpjs];
-      const infosCnae = cnpjsArr.map(c => mapCnae[c]).filter(Boolean);
-      const algumSimples = infosCnae.some(i => i.simples === true);
-      const todosPendentes = infosCnae.length === 0 || infosCnae.every(i => i.pendente);
       const nMeses = m.mesesComCompra.size;
       let recorrencia;
       if(nMeses >= 10) recorrencia = 'Mensal';
@@ -272,20 +252,16 @@ async function loadAll(){
 
       return {
         fornecedor: m.fornecedor,
+        label: m.label || m.fornecedor,
         categoria: m.categoria,
         valorTotal: m.valorTotal,
         qtdNotas: m.qtdNotas.size,
         mesesComCompra: nMeses,
         recorrencia,
-        simples: todosPendentes ? null : algumSimples,
-        pendente: todosPendentes,
-        _cnpjs: cnpjsArr,
-        _simplesBruto: cnpjsArr.map(c => mapCnae[c] ? mapCnae[c].simples : 'CNPJ NÃO ENCONTRADO NA TabCNAE'),
+        simples: m.simples,
+        pendente: m.simples === null,
       };
     }).sort((a,b) => b.valorTotal - a.valorTotal);
-
-    // Anonimização: rank por posição no valor (1 = maior)
-    lista.forEach((f, i) => { f.rank = i+1; f.label = `Fornecedor ${i+1}`; });
 
     fornecedores = lista;
     render();
@@ -339,6 +315,10 @@ function render(){
     <div class="desc">Destes 15 fornecedores, <strong>${simplesLista.length}</strong> são optantes pelo Simples Nacional, representando <strong>${pctValorSimples.toFixed(1)}%</strong> do valor total analisado.</div>
 
     <div class="insight-box">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f2440" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
+        <span style="font-size:0.72rem; font-weight:700; letter-spacing:0.03em; color:var(--navy); text-transform:uppercase;">Análise gerada por IA</span>
+      </div>
       <strong>Impacto da Reforma Tributária (IBS/CBS) a observar:</strong> 2026 é um ano de teste, com alíquotas simbólicas e sem recolhimento efetivo para o Simples Nacional. A partir de 2027, a CBS entra em vigor de fato e o Simples passa a destacar IBS/CBS na nota fiscal. O ponto de atenção para o Grupo Raviera como <strong>comprador</strong>: fornecedores no Simples padrão tendem a gerar menos crédito tributário de IBS/CBS do que fornecedores no regime normal — o que pode tornar essas compras relativamente mais caras em termos de crédito recuperável a partir de 2027. Vale reavaliar, com antecedência, se algum desses fornecedores pretende migrar para o "Simples Híbrido" (que gera crédito mais completo, mas com apuração mais complexa) ou se compensa buscar alternativas no regime normal para os itens de maior valor.
       <div class="fonte">Baseado nas regras da Reforma Tributária (EC 132/2023, LC 214/2025) e no cronograma de transição 2026–2033 divulgado por fontes contábeis especializadas.</div>
     </div>
@@ -378,22 +358,6 @@ function render(){
   </section>`;
 
   html += `<div class="note">Mais análises serão adicionadas aqui conforme o projeto evoluir.</div>`;
-
-  // ---- DIAGNÓSTICO TEMPORÁRIO (remover depois de confirmar que o cruzamento está certo) ----
-  let debugRows = fornecedores.map(f => `<tr>
-      <td>${f.label} (${f.fornecedor})</td>
-      <td>${[...f._cnpjs||[]].join(', ')}</td>
-      <td>${f._simplesBruto === undefined ? '-' : JSON.stringify(f._simplesBruto)}</td>
-      <td>${f.simples === null ? 'pendente' : (f.simples ? 'SIM' : 'não')}</td>
-      <td>${f.pendente ? 'sim' : 'não'}</td>
-    </tr>`).join('');
-  html += `<section class="block" style="border:2px dashed #c8442d;">
-    <h2 style="color:#c8442d;">🔧 Diagnóstico temporário (remover depois)</h2>
-    <table class="monthly">
-      <thead><tr><th>Fornecedor</th><th>CNPJ(s) usados</th><th>Simples bruto (por CNPJ)</th><th>Simples final</th><th>Pendente?</th></tr></thead>
-      <tbody>${debugRows}</tbody>
-    </table>
-  </section>`;
 
   document.getElementById('content').innerHTML = html;
   renderChartRecorrencia(contagemRec);
