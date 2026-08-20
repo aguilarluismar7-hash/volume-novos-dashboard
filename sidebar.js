@@ -3,7 +3,7 @@
 // Mudar um link, o texto da marca, ou a logo? Só precisa editar AQUI.
 (function(){
   const NAV_ITEMS = [
-    { href: '/fornecedores.htmml', label: 'Fornecedores' },
+    { href: '/index.htmml', label: 'Fornecedores' },
     { href: '/usados.html', label: 'Usados' },
     { href: '/pos-vendas.html', label: 'Pós-Vendas' },
     { href: '/relatorio.html', label: 'DRE' },
