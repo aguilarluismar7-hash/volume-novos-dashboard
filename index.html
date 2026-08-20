@@ -495,7 +495,10 @@ async function loadAll(){
         const ano = dataObj ? dataObj.getFullYear() : (v25 !== null ? 2025 : (v26 !== null ? 2026 : null));
         const mes = dataObj ? (dataObj.getMonth()+1) : null;
         const simplesRaw = idx.optanteSimples !== -1 ? (r[idx.optanteSimples]||'').toString().trim() : '';
-        const simples = simplesRaw === '1' ? true : (simplesRaw === '0' ? false : null);
+        const simplesUpper = simplesRaw.toUpperCase();
+        const simples = (simplesUpper === '1' || simplesUpper === 'VERDADEIRO' || simplesUpper === 'TRUE') ? true
+          : (simplesUpper === '0' || simplesUpper === 'FALSO' || simplesUpper === 'FALSE') ? false
+          : null;
         return {
           fornecedor,
           label,
@@ -742,8 +745,8 @@ function render(){
 
   let rankRows = '';
   resumoRanking.forEach(r => {
-    const aberto = rankingAberto === r.fornecedor;
-    rankRows += `<tr class="click-row${aberto?' aberto':''}" onclick="toggleRanking('${r.fornecedor.replace(/'/g,"\\'")}')">
+    const aberto = rankingAberto === r.label;
+    rankRows += `<tr class="click-row${aberto?' aberto':''}" onclick="toggleRanking('${r.label.replace(/'/g,"\\'")}')">
       <td>${r.label}${badgeAlerta(r.ultimaCompra)}</td>
       <td><span class="badge">${r.categoria || '—'}</span></td>
       <td>${r.qtdNotas}</td>
@@ -753,7 +756,7 @@ function render(){
     </tr>`;
     if(aberto){
       const notas = rowsFiltradas
-        .filter(n => n.fornecedor === r.fornecedor)
+        .filter(n => (n.label||n.fornecedor) === r.label)
         .sort((a,b) => (b.data?.getTime()||0) - (a.data?.getTime()||0));
       const notasRows = notas.map(n => `<tr>
           <td>${fmtDate(n.data)}</td>
@@ -811,8 +814,8 @@ function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
 
   let rows = '';
   resumo.forEach(r => {
-    const abertoF = fornecedorAberto === (categoria + '::' + r.fornecedor);
-    rows += `<tr class="click-row${abertoF?' aberto':''}" onclick="event.stopPropagation(); toggleFornecedor('${categoria.replace(/'/g,"\\'")}','${r.fornecedor.replace(/'/g,"\\'")}')">
+    const abertoF = fornecedorAberto === (categoria + '::' + r.label);
+    rows += `<tr class="click-row${abertoF?' aberto':''}" onclick="event.stopPropagation(); toggleFornecedor('${categoria.replace(/'/g,"\\'")}','${r.label.replace(/'/g,"\\'")}')">
       <td>${r.label}${badgeAlerta(r.ultimaCompra)}</td>
       <td>${r.qtdNotas}</td>
       <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
@@ -821,7 +824,7 @@ function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
     </tr>`;
     if(abertoF){
       const notas = rowsDaCategoria
-        .filter(n => n.fornecedor === r.fornecedor)
+        .filter(n => (n.label||n.fornecedor) === r.label)
         .sort((a,b) => (b.data?.getTime()||0) - (a.data?.getTime()||0));
       const notasRows = notas.map(n => `<tr>
           <td>${fmtDate(n.data)}</td>
