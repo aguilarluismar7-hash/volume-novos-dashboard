@@ -218,7 +218,10 @@ async function loadAll(){
       const mes = dataObj ? (dataObj.getMonth()+1) : null;
       const simplesRawTexto = (r[idxF.optanteSimples]||'').toString();
       const simplesRaw = simplesRawTexto.trim();
-      const simples = simplesRaw === '1' ? true : (simplesRaw === '0' ? false : null);
+      const simplesUpper = simplesRaw.toUpperCase();
+      const simples = (simplesUpper === '1' || simplesUpper === 'VERDADEIRO' || simplesUpper === 'TRUE') ? true
+        : (simplesUpper === '0' || simplesUpper === 'FALSO' || simplesUpper === 'FALSE') ? false
+        : null;
       return {
         fornecedor, label,
         categoria: (r[idxF.categoria]||'').trim(),
