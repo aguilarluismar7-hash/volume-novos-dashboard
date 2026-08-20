@@ -75,6 +75,28 @@
     font-size:0.9rem;
     color:var(--text);
   }
+  .autocomplete-wrap{ position:relative; }
+  .autocomplete-list{
+    position:absolute;
+    top:calc(100% + 2px);
+    left:0; right:0;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:8px;
+    max-height:220px;
+    overflow-y:auto;
+    z-index:20;
+    box-shadow:0 8px 20px rgba(15,36,64,0.10);
+    display:none;
+  }
+  .autocomplete-list.show{ display:block; }
+  .autocomplete-item{
+    padding:8px 12px;
+    font-size:0.85rem;
+    cursor:pointer;
+    color:var(--text);
+  }
+  .autocomplete-item:hover{ background:#f3f6fa; }
 
   .kpi-row{
     display:grid;
@@ -271,6 +293,7 @@
   <header>
     <div style="display:flex; align-items:center; gap:14px;">
       <h1>Análise de Fornecedores</h1>
+      <div class="subtitle">Recorte atual: Top 15 fornecedores por valor total · Operação "Entradas Nfs Diversas" · Período 2025–2026</div>
     </div>
     <div class="status">
       <span id="lastUpdated">Carregando…</span>
@@ -281,8 +304,10 @@
   <div class="filters">
     <div class="filter">
       <label>Buscar Fornecedor</label>
-      <input type="text" id="fBusca" list="listaFornecedores" placeholder="Digite ou escolha na lista…" autocomplete="off">
-      <datalist id="listaFornecedores"></datalist>
+      <div class="autocomplete-wrap">
+        <input type="text" id="fBusca" placeholder="Digite para buscar…" autocomplete="off">
+        <div class="autocomplete-list" id="fBuscaLista"></div>
+      </div>
     </div>
     <div class="filter">
       <label>Categoria</label>
@@ -315,6 +340,7 @@ let categoriasAbertas = new Set();
 let fornecedorAberto = null;
 let rankingAberto = null;
 let dataReferencia = null; // maior data encontrada na base — usada para calcular "dias sem comprar"
+let listaNomesFornecedores = [];
 
 const CORES_CATEGORIA = ['#0f2440','#16345c','#1f8a5f','#c8442d','#d9a441','#6b7789','#8ca3c2','#a9425a','#3d7a6e','#7a5c9e'];
 
@@ -512,14 +538,11 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
-  const nomesFornecedores = [...new Set(rawRows.map(r => r.fornecedor).filter(Boolean))].sort();
-  document.getElementById('listaFornecedores').innerHTML =
-    nomesFornecedores.map(n => `<option value="${n}">`).join('');
+  listaNomesFornecedores = [...new Set(rawRows.map(r => r.fornecedor).filter(Boolean))].sort();
 
   catSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   contaSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   document.getElementById('fAno').onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
-  document.getElementById('fBusca').oninput = () => { render(); };
 }
 
 function getFilters(){
@@ -607,22 +630,25 @@ function badgeAlerta(ultimaCompra){
 
 function render(){
   const f = getFilters();
-  const rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
-
-  const resumoGeralFornecedor = resumoPorFornecedor(rowsFiltradas);
-  let categorias = resumoPorCategoria(rowsFiltradas);
-
+  let rowsFiltradas = rawRows.filter(r => matchesFilters(r, f));
   if(f.busca){
-    const catsComMatch = new Set(
-      resumoGeralFornecedor.filter(r => r.fornecedor.toLowerCase().includes(f.busca)).map(r => r.categoria || 'Sem categoria')
-    );
-    categorias = categorias.filter(c => catsComMatch.has(c.categoria));
+    rowsFiltradas = rowsFiltradas.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
   }
 
-  const valorTotalGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.valorTotal,0);
-  const qtdFornecedoresGeral = resumoGeralFornecedor.length;
-  const qtdNotasGeral = resumoGeralFornecedor.reduce((s,r)=>s+r.qtdNotas,0);
-  const mesesGeral = new Set(rowsFiltradas.filter(r=>r.ano&&r.mes).map(r=>r.ano+'-'+r.mes)).size;
+  const resumoGeralFornecedor = resumoPorFornecedor(rowsFiltradas);
+  const categorias = resumoPorCategoria(rowsFiltradas);
+
+  // KPIs — agora considerando também o filtro de busca (fornecedor), não só Ano/Categoria/Conta
+  const resumoParaKPI = f.busca
+    ? resumoGeralFornecedor.filter(r => r.fornecedor.toLowerCase().includes(f.busca))
+    : resumoGeralFornecedor;
+  const fornecedoresQueBatem = new Set(resumoParaKPI.map(r => r.fornecedor));
+  const rowsParaKPI = f.busca ? rowsFiltradas.filter(r => fornecedoresQueBatem.has(r.fornecedor)) : rowsFiltradas;
+
+  const valorTotalGeral = resumoParaKPI.reduce((s,r)=>s+r.valorTotal,0);
+  const qtdFornecedoresGeral = resumoParaKPI.length;
+  const qtdNotasGeral = resumoParaKPI.reduce((s,r)=>s+r.qtdNotas,0);
+  const mesesGeral = new Set(rowsParaKPI.filter(r=>r.ano&&r.mes).map(r=>r.ano+'-'+r.mes)).size;
   const mediaMensalGeral = mesesGeral ? valorTotalGeral/mesesGeral : null;
 
   let html = `<div class="kpi-row">
@@ -632,7 +658,6 @@ function render(){
         Valor Total
       </div>
       <div class="kpi-value valor-grande">R$ ${fmt(valorTotalGeral)}</div>
-      <div class="kpi-sub">com os filtros ativos</div>
     </div>
     <div class="card c-fornecedores" style="animation-delay:0.08s">
       <div class="kpi-label">
@@ -640,7 +665,6 @@ function render(){
         Fornecedores
       </div>
       <div class="kpi-value">${qtdFornecedoresGeral}</div>
-      <div class="kpi-sub">nomes únicos</div>
     </div>
     <div class="card c-notas" style="animation-delay:0.16s">
       <div class="kpi-label">
@@ -648,7 +672,6 @@ function render(){
         Notas Fiscais
       </div>
       <div class="kpi-value">${qtdNotasGeral}</div>
-      <div class="kpi-sub">no período filtrado</div>
     </div>
     <div class="card c-ticket" style="animation-delay:0.24s">
       <div class="kpi-label">
@@ -656,7 +679,6 @@ function render(){
         Média Mensal
       </div>
       <div class="kpi-value">R$ ${fmt(mediaMensalGeral)}</div>
-      <div class="kpi-sub">gasto médio por mês</div>
     </div>
   </div>`;
 
@@ -697,9 +719,6 @@ function render(){
 
   // ---- Ranking geral de fornecedores (independente da categoria aberta acima) ----
   let resumoRanking = resumoGeralFornecedor;
-  if(f.busca){
-    resumoRanking = resumoRanking.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
-  }
 
   let rankRows = '';
   resumoRanking.forEach(r => {
@@ -881,6 +900,40 @@ function renderChartCategoria(categorias){
     }
   });
 }
+
+function onBuscaInput(){
+  const termo = document.getElementById('fBusca').value.trim().toLowerCase();
+  const lista = document.getElementById('fBuscaLista');
+  if(!termo){
+    lista.classList.remove('show');
+    lista.innerHTML = '';
+  } else {
+    const matches = listaNomesFornecedores.filter(n => n.toLowerCase().includes(termo)).slice(0,8);
+    lista.innerHTML = matches.map(n => `<div class="autocomplete-item" onclick="selecionarFornecedor('${n.replace(/'/g,"\\'")}')">${n}</div>`).join('');
+    lista.classList.toggle('show', matches.length > 0);
+  }
+  categoriasAbertas.clear();
+  fornecedorAberto = null;
+  rankingAberto = null;
+  render();
+}
+
+function selecionarFornecedor(nome){
+  document.getElementById('fBusca').value = nome;
+  document.getElementById('fBuscaLista').classList.remove('show');
+  categoriasAbertas.clear();
+  fornecedorAberto = null;
+  rankingAberto = null;
+  render();
+}
+
+document.getElementById('fBusca').addEventListener('input', onBuscaInput);
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.autocomplete-wrap')){
+    const lista = document.getElementById('fBuscaLista');
+    if(lista) lista.classList.remove('show');
+  }
+});
 
 loadAll();
 </script>
