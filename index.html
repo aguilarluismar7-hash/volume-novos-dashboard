@@ -82,6 +82,24 @@
     border:1px solid var(--border);
     border-radius:12px;
     padding:18px 20px;
+    transition:transform 0.18s ease, box-shadow 0.18s ease;
+    opacity:0;
+    animation:fadeInUp 0.45s ease forwards;
+  }
+  .card:hover{
+    transform:translateY(-3px);
+    box-shadow:0 8px 20px rgba(15,36,64,0.08);
+  }
+  @keyframes fadeInUp{
+    from{ opacity:0; transform:translateY(10px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  .kpi-value{
+    font-size:1.7rem;
+    font-weight:700;
+    color:var(--navy);
+    line-height:1;
+    transition:color 0.2s ease;
   }
   .kpi-label{
     font-size:0.7rem;
@@ -91,7 +109,6 @@
     text-transform:uppercase;
     margin-bottom:10px;
   }
-  .kpi-value{font-size:1.7rem;font-weight:700;color:var(--navy);line-height:1;}
   .kpi-value.red{color:var(--red);}
   .kpi-value.green{color:var(--green);}
   .kpi-sub{margin-top:6px;font-size:0.8rem;color:var(--muted);}
@@ -510,22 +527,22 @@ function render(){
   const ticketMedioGeral = qtdNotasGeral ? valorTotalGeral/qtdNotasGeral : 0;
 
   let html = `<div class="kpi-row">
-    <div class="card">
+    <div class="card" style="animation-delay:0s">
       <div class="kpi-label">Valor Total</div>
       <div class="kpi-value">R$ ${fmt(valorTotalGeral)}</div>
       <div class="kpi-sub">com os filtros ativos</div>
     </div>
-    <div class="card">
+    <div class="card" style="animation-delay:0.08s">
       <div class="kpi-label">Fornecedores</div>
       <div class="kpi-value">${qtdFornecedores}</div>
       <div class="kpi-sub">CNPJs únicos</div>
     </div>
-    <div class="card">
+    <div class="card" style="animation-delay:0.16s">
       <div class="kpi-label">Notas Fiscais</div>
       <div class="kpi-value">${qtdNotasGeral}</div>
       <div class="kpi-sub">no período filtrado</div>
     </div>
-    <div class="card">
+    <div class="card" style="animation-delay:0.24s">
       <div class="kpi-label">Ticket Médio</div>
       <div class="kpi-value">R$ ${fmt(ticketMedioGeral)}</div>
       <div class="kpi-sub">por nota fiscal</div>
