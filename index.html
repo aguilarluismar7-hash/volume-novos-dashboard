@@ -276,9 +276,10 @@
 
 <script>
 let rawRows = [];      // linhas de detalhe de NF já limpas: {fornecedor, categoria, conta, nf, data, ano, mes, valor}
-let charts = {categoria:null};
+let charts = {categoria:null, ranking:null};
 let categoriaAberta = null;
 let fornecedorAberto = null;
+let rankingAberto = null;
 
 function csvUrl(sheetName){
   return `/api/sheet?tab=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
@@ -471,9 +472,9 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
-  catSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
-  contaSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
-  document.getElementById('fAno').onchange = () => { categoriaAberta=null; fornecedorAberto=null; render(); };
+  catSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
+  contaSel.onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
+  document.getElementById('fAno').onchange = () => { categoriaAberta=null; fornecedorAberto=null; rankingAberto=null; render(); };
   document.getElementById('fBusca').oninput = () => { render(); };
 }
 
@@ -634,8 +635,66 @@ function render(){
     </div>
   </section>`;
 
+  // ---- Ranking geral de fornecedores (independente da categoria aberta acima) ----
+  let resumoRanking = resumoGeralFornecedor;
+  if(f.busca){
+    resumoRanking = resumoRanking.filter(r => r.fornecedor.toLowerCase().includes(f.busca));
+  }
+
+  let rankRows = '';
+  resumoRanking.forEach(r => {
+    const aberto = rankingAberto === r.fornecedor;
+    rankRows += `<tr class="click-row${aberto?' aberto':''}" onclick="toggleRanking('${r.fornecedor.replace(/'/g,"\\'")}')">
+      <td>${r.fornecedor}</td>
+      <td><span class="badge">${r.categoria || '—'}</span></td>
+      <td>${r.qtdNotas}</td>
+      <td>${r.mediaMensal===null?'-':'R$ '+fmt(r.mediaMensal)}</td>
+      <td>${fmtDate(r.ultimaCompra)}</td>
+      <td class="total">R$ ${fmt(r.valorTotal)}</td>
+    </tr>`;
+    if(aberto){
+      const notas = rowsFiltradas
+        .filter(n => n.fornecedor === r.fornecedor)
+        .sort((a,b) => (b.data?.getTime()||0) - (a.data?.getTime()||0));
+      const notasRows = notas.map(n => `<tr>
+          <td>${fmtDate(n.data)}</td>
+          <td>${n.conta || '-'}</td>
+          <td>${n.nf}</td>
+          <td class="total">R$ ${fmt(n.valor)}</td>
+        </tr>`).join('');
+      rankRows += `<tr><td colspan="6" style="padding:0; border-bottom:none;">
+        <div class="sub-block">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <strong style="color:var(--navy); font-size:0.85rem;">Notas fiscais — ${notas.length} encontrada(s)</strong>
+            <span class="sub-close" onclick="event.stopPropagation(); rankingAberto=null; render();">Fechar</span>
+          </div>
+          <div style="max-height:300px; overflow-y:auto;">
+          <table class="monthly">
+            <thead><tr><th>Data</th><th>Conta Contábil</th><th>Nº NF</th><th class="total">Valor</th></tr></thead>
+            <tbody>${notasRows || '<tr><td colspan="4" style="text-align:center;">Sem notas nesse filtro.</td></tr>'}</tbody>
+          </table>
+          </div>
+        </div>
+      </td></tr>`;
+    }
+  });
+
+  html += `<section class="block">
+    <h2>Ranking de Fornecedores <span class="note" style="display:inline;">(clique numa linha para ver as notas)</span></h2>
+    <div class="categoria-layout">
+      <div style="overflow-x:auto;">
+        <table class="monthly">
+          <thead><tr><th>Fornecedor</th><th>Categoria</th><th>Notas</th><th>Média Mensal</th><th>Última Compra</th><th class="total">Valor Total</th></tr></thead>
+          <tbody>${rankRows || '<tr><td colspan="6" style="text-align:center;">Nenhum fornecedor encontrado com esses filtros.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="chart-box-cat"><canvas id="chartRanking"></canvas></div>
+    </div>
+  </section>`;
+
   document.getElementById('content').innerHTML = html;
   renderChartCategoria(categorias);
+  renderChartRanking(resumoRanking);
 }
 
 function buildFornecedorSubTabela(categoria, rowsFiltradas, f){
@@ -707,6 +766,30 @@ function toggleFornecedor(categoria, fornecedor){
   const key = categoria + '::' + fornecedor;
   fornecedorAberto = (fornecedorAberto === key) ? null : key;
   render();
+}
+
+function toggleRanking(fornecedor){
+  rankingAberto = (rankingAberto === fornecedor) ? null : fornecedor;
+  render();
+}
+
+function renderChartRanking(resumo){
+  const top10 = resumo.slice(0,10);
+  const ctx = document.getElementById('chartRanking');
+  if(charts.ranking) charts.ranking.destroy();
+  charts.ranking = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: top10.map(r=>r.fornecedor.length>26 ? r.fornecedor.slice(0,26)+'…' : r.fornecedor),
+      datasets:[{ data: top10.map(r=>r.valorTotal), backgroundColor:'#0f2440', borderRadius:4 }]
+    },
+    options:{
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{ x:{ grid:{color:'#eef1f5'} }, y:{ grid:{display:false} } }
+    }
+  });
 }
 
 function renderChartCategoria(categorias){
