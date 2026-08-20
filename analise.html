@@ -279,6 +279,8 @@ async function loadAll(){
         recorrencia,
         simples: todosPendentes ? null : algumSimples,
         pendente: todosPendentes,
+        _cnpjs: cnpjsArr,
+        _simplesBruto: cnpjsArr.map(c => mapCnae[c] ? mapCnae[c].simples : 'CNPJ NÃO ENCONTRADO NA TabCNAE'),
       };
     }).sort((a,b) => b.valorTotal - a.valorTotal);
 
@@ -376,6 +378,22 @@ function render(){
   </section>`;
 
   html += `<div class="note">Mais análises serão adicionadas aqui conforme o projeto evoluir.</div>`;
+
+  // ---- DIAGNÓSTICO TEMPORÁRIO (remover depois de confirmar que o cruzamento está certo) ----
+  let debugRows = fornecedores.map(f => `<tr>
+      <td>${f.label} (${f.fornecedor})</td>
+      <td>${[...f._cnpjs||[]].join(', ')}</td>
+      <td>${f._simplesBruto === undefined ? '-' : JSON.stringify(f._simplesBruto)}</td>
+      <td>${f.simples === null ? 'pendente' : (f.simples ? 'SIM' : 'não')}</td>
+      <td>${f.pendente ? 'sim' : 'não'}</td>
+    </tr>`).join('');
+  html += `<section class="block" style="border:2px dashed #c8442d;">
+    <h2 style="color:#c8442d;">🔧 Diagnóstico temporário (remover depois)</h2>
+    <table class="monthly">
+      <thead><tr><th>Fornecedor</th><th>CNPJ(s) usados</th><th>Simples bruto (por CNPJ)</th><th>Simples final</th><th>Pendente?</th></tr></thead>
+      <tbody>${debugRows}</tbody>
+    </table>
+  </section>`;
 
   document.getElementById('content').innerHTML = html;
   renderChartRecorrencia(contagemRec);
