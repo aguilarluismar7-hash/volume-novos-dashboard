@@ -152,6 +152,9 @@
     gap:18px;
     align-items:start;
   }
+  .categoria-layout.full{
+    grid-template-columns:1fr;
+  }
   .ranking-layout{ display:block; }
   .ranking-layout .chart-box-cat{ margin-top:18px; height:340px; }
   .chart-box-cat{position:relative; height:360px;}
@@ -277,8 +280,17 @@
 
   <div class="filters">
     <div class="filter">
+      <label>Buscar Fornecedor</label>
+      <input type="text" id="fBusca" list="listaFornecedores" placeholder="Digite ou escolha na lista…" autocomplete="off">
+      <datalist id="listaFornecedores"></datalist>
+    </div>
+    <div class="filter">
       <label>Categoria</label>
       <select id="fCategoria"><option value="Todas">Todas</option></select>
+    </div>
+    <div class="filter">
+      <label>Conta Contábil</label>
+      <select id="fConta"><option value="Todas">Todas</option></select>
     </div>
     <div class="filter">
       <label>Ano</label>
@@ -287,14 +299,6 @@
         <option value="2025">2025</option>
         <option value="2026">2026</option>
       </select>
-    </div>
-    <div class="filter">
-      <label>Conta Contábil</label>
-      <select id="fConta"><option value="Todas">Todas</option></select>
-    </div>
-    <div class="filter">
-      <label>Buscar Fornecedor</label>
-      <input type="text" id="fBusca" placeholder="Nome do fornecedor…">
     </div>
   </div>
 
@@ -508,6 +512,10 @@ function buildFilters(){
     contas.map(c => `<option value="${c}">${c}</option>`).join('');
   contaSel.value = contas.includes(prevConta) ? prevConta : 'Todas';
 
+  const nomesFornecedores = [...new Set(rawRows.map(r => r.fornecedor).filter(Boolean))].sort();
+  document.getElementById('listaFornecedores').innerHTML =
+    nomesFornecedores.map(n => `<option value="${n}">`).join('');
+
   catSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   contaSel.onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
   document.getElementById('fAno').onchange = () => { categoriasAbertas.clear(); fornecedorAberto=null; rankingAberto=null; render(); };
@@ -669,19 +677,21 @@ function render(){
     }
   });
 
+  const algumaAberta = categoriasAbertas.size > 0;
+
   html += `<section class="block">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <h2 style="margin:0;">Categorias <span class="note" style="display:inline;">(clique para ver os fornecedores)</span></h2>
       <button class="btn-mini" onclick="toggleExpandirTudo(${JSON.stringify(categorias.map(c=>c.categoria))})">${todasAbertas ? 'Recolher todas' : 'Expandir todas'}</button>
     </div>
-    <div class="categoria-layout">
+    <div class="${algumaAberta ? '' : 'categoria-layout'}">
       <div style="overflow-x:auto;">
         <table class="monthly">
           <thead><tr><th>Categoria</th><th>Fornecedores</th><th>Notas</th><th class="total">Valor Total</th></tr></thead>
           <tbody>${catRows || '<tr><td colspan="4" style="text-align:center;">Nenhuma categoria encontrada com esses filtros.</td></tr>'}</tbody>
         </table>
       </div>
-      <div class="chart-box-cat"><canvas id="chartCategoria"></canvas></div>
+      ${algumaAberta ? '' : '<div class="chart-box-cat"><canvas id="chartCategoria"></canvas></div>'}
     </div>
   </section>`;
 
@@ -743,7 +753,12 @@ function render(){
   </section>`;
 
   document.getElementById('content').innerHTML = html;
-  renderChartCategoria(categorias);
+  if(document.getElementById('chartCategoria')){
+    renderChartCategoria(categorias);
+  } else if(charts.categoria){
+    charts.categoria.destroy();
+    charts.categoria = null;
+  }
   renderChartRanking(resumoRanking);
 }
 
